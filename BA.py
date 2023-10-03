@@ -15,7 +15,8 @@ n = pypsa.Network()
 # set time steps
 n.set_snapshots(pd.date_range(start="2023-01-01", end="2023-01-31", freq="H"))
 # gggg
-#hahha
+# hahha
+# lol
 
 # add a bus/region for electricity
 n.add("Bus", "windstrom")
