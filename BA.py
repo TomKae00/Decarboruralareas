@@ -52,6 +52,8 @@ n.add("Link",
       efficiency=COP,
       p_nom_extendable=True)
 
+
+
 n.optimize()
 
 # optimal capacities wind warm
