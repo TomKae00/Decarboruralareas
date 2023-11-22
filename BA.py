@@ -11,7 +11,7 @@ date_input = "%Y-%m-%d %H:%M:%S"
 # create new .py for the calculation of the COP. If not too long add to main script
 #VLT = 90
 #RLT = 75
-
+#huhu
 # cost function heat pump
 #def capital_cost_HP(p_nom):
 #      cost = 3 * p_nom**2 + 2 * p_nom
