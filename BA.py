@@ -13,9 +13,9 @@ date_input = "%Y-%m-%d %H:%M:%S"
 #RLT = 75
 
 # cost function heat pump
-def capital_cost_HP(p_nom):
-      cost = 3 * p_nom**2 + 2 * p_nom
-      return cost
+#def capital_cost_HP(p_nom):
+#      cost = 3 * p_nom**2 + 2 * p_nom
+#      return cost
 
 plt.style.use("bmh")
 
@@ -103,7 +103,7 @@ n.add("Link",
       bus1="Waerme",
       efficiency=COP,
       p_nom_extendable=True,
-      capital_cost=capital_cost_HP)
+      capital_cost=10)
 
 # add e-boiler
 n.add("Link",
