@@ -8,6 +8,15 @@ import matplotlib.pyplot as plt
 
 date_input = "%Y-%m-%d %H:%M:%S"
 
+# create new .py for the calculation of the COP. If not too long add to main script
+#VLT = 90
+#RLT = 75
+
+# cost function heat pump
+def capital_cost_HP(p_nom):
+      cost = 3 * p_nom**2 + 2 * p_nom
+      return cost
+
 plt.style.use("bmh")
 
 # create PyPSA network
@@ -15,11 +24,15 @@ n = pypsa.Network()
 # set time steps
 n.set_snapshots(pd.date_range(start="2023-01-01", end="2023-01-31", freq="H"))
 
+# add the costs of 2020
+costs_20 = pd.read_csv("data/costs_2020.csv")
+
 # add a bus/region for electricity
 n.add("Bus", "windstrom")
 # capacity factor of the wind farm (random values)
 #random_series = pd.Series(np.random.rand(len(n.snapshots)), index=n.snapshots)
 
+#das geht auch anders! gucken, wie man direkt eine Serie reinlädt, wahrscheinlich über index = snapshots
 wind_power_data = pd.read_csv('data/wind_power.csv', parse_dates=['timestamp'], date_format=date_input)
 wind_power_series = wind_power_data.set_index('timestamp')['wind_power']
 
@@ -44,8 +57,11 @@ n.add("Bus","H2")
 n.add("Store",
       "Waerme speicher",
       bus="Waerme",
-      capital_cost=9,
-      e_nom_extendable=True)
+      capital_cost=10,
+      e_nom_max=1000,
+      e_nom_min=500,
+      e_nom_extendable=True,
+      standing_loss=0.01)
 # add battery storage
 n.add("Store",
       "Batterie Speicher",
@@ -56,7 +72,7 @@ n.add("Store",
 n.add("Store",
       "H2 Speicher",
       bus="H2",
-      capital_cost=30,
+      capital_cost=costs_20.iloc[159, 2],
       e_nom_extendable=True)
 
 # add electrolysis for H2 production
@@ -78,14 +94,16 @@ n.add("Link",
 # add heat conversion technologies
 
 # add heat pump
-# COP random
+# calculating COP
+capital_costs = capital_cost_HP(n.generators.p_nom)
 COP = pd.Series(4*np.random.rand(len(n.snapshots)), index=n.snapshots)
 n.add("Link",
       "Waermepumpe",
       bus0="windstrom",
       bus1="Waerme",
       efficiency=COP,
-      p_nom_extendable=True)
+      p_nom_extendable=True,
+      capital_cost=capital_cost_HP)
 
 # add e-boiler
 n.add("Link",
@@ -127,3 +145,5 @@ n.stores_t.e.plot()
 
 n.export_to_csv_folder("results")
 print("csv exported sucessfully")
+
+#more to come
