@@ -127,3 +127,4 @@ wind = cutout.wind(matrix=capacity_matrix, turbine="Vestas_V90_3MW", index=close
 
 wind.isel(time=0).plot()
 plt.show()
+
