@@ -17,12 +17,16 @@ p = 998
 e_nom_max_heat_storage = 100e6
 size = e_nom_max_heat_storage / (dT * cp * p)
 
-params = {
-    "fill_values": 0.0,  # Example value for fill_values
-    "r": 0.02,           # Example value for discount rate
-    "nyears": 1,           # Example value for the number of years
-    "year": 2020          # Example value for the year
-}
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
+
+params = config['params']
+
+# Accessing individual parameters
+fill_values = params['fill_values']
+r = params['r']
+nyears = params['nyears']
+year = params['year']
 
 cost_file = f"data/costs_{params['year']}.csv"
 
@@ -174,8 +178,13 @@ n.add("Link",
       #p_nom_min=0.05,
       #p_nom_max=0.1,
       p_min_pu=0.1,
+      commitable=True,
       capital_cost=result.loc["central air-sourced heat pump", "fixed"]
       )
+
+#Auswahl einer Wärmepumpe und dann weiter in der Simulation
+# p_nom danch nicht festlegen
+# nach der Sensitivität p_nom festlegen und dann commtable nutzen, Auswirkung betrachten
 
 n.add("Link",
       "E-Kessel",
@@ -185,7 +194,7 @@ n.add("Link",
       capital_cost=result.loc["electric boiler steam", "fixed"],
       marginal_cost=result.loc["electric boiler steam", "VOM"],
       p_nom_extendable=True,
-      p_max_pu=0.01
+      #p_max_pu=0.01
       )
 
 

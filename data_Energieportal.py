@@ -1,35 +1,45 @@
 from owslib.wfs import WebFeatureService
 import geopandas as gpd
-from owslib.etree import etree
 import io
+import pandas as pd
 
-# URL des WFS-Dienstes
-# bepo alle daten aus simenergy
-# energierzeugungsanlagen
-# solaratlas
 
+def fetch_layer(wfs, layer_name):
+    response = wfs.getfeature(typename=layer_name, outputFormat='json')
+    data = io.BytesIO(response.read())
+    return gpd.read_file(data)
+
+
+# URL of the WFS service
 url = 'https://energieportal-brandenburg.de/geoserver/bepo/ows'
 
-# Verbindung zum WFS herstellen
+# Connect to the WFS
 wfs = WebFeatureService(url=url, version='2.0.0')
 
-# Verfügbare Layer auflisten (optional)
 for layer in wfs.contents:
     print(layer, wfs[layer].title, wfs[layer].abstract)
 
-layer = 'bepo:Brandenburg_Netze'
-layer_info = wfs[layer]
+# Layers to be used
+layers = [
+    'bepo:Gemarkungen_Abwasser',
+    'bepo:Gemarkungen_Abwaerme_Industrie',
+    'bepo:Eignung_EWK',
+    'bepo:Fläche_EWK',
+    'bepo:Brandenburg_Fernwaerme',
+    'bepo:Gemarkungen_Flussthermie',
+    'bepo:Gemarkungen_Seethermie',
+    'bepo:datenquellen',
+    'bepo:Ausschuss'
+]
 
-print(layer_info.title, layer_info.abstract, layer_info.boundingBoxWGS84)
+# Fetch and store layers in a dictionary
+layer_data = {layer: fetch_layer(wfs, layer) for layer in layers}
 
-#filterxml = etree.tostring(filter_property.toXML()).decode("utf-8")
-
-# Request data from the layer
-response = wfs.getfeature(typename=layer, outputFormat='json')
-
-# Read the data
-data = response.read()
-
-data_io = io.BytesIO(data)
-
-Netze = gpd.read_file(data_io)
+# Example: Access and work with a specific layer
+fernwaerme_df = layer_data['bepo:Brandenburg_Fernwaerme']
+abwaerme_df = layer_data['bepo:Gemarkungen_Abwaerme_Industrie']
+abwasser_df = layer_data['bepo:Gemarkungen_Abwasser']
+flussthermie_df = layer_data['bepo:Gemarkungen_Flussthermie']
+ausschluss_df = layer_data['bepo:Ausschuss']
+datenquellen_df = layer_data['bepo:datenquellen']
+# Perform data analysis or visualization with netze_df

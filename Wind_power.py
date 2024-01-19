@@ -13,15 +13,20 @@ import xarray as xr
 import fiona
 from shapely.geometry import MultiLineString
 
+from shapely.ops import unary_union
+import networkx as nx
+
 
 pa = gpd.read_file('data/RLI-potentialareas_wind_pv_v1.0/data/potentialarea_wind_settlement-1000m.gpkg')
 pa = pa.set_index("id").drop(['country_id'], axis=1)
 pa = pa.to_crs(3035)
-area_wind = (pa.area / 1e6)
+area_wind = pa.area / 1e6
 area_wind.name = "area_wind"
 pa_new = pd.concat([pa, area_wind], axis=1)
 print(pa.crs)
 print(pa.total_bounds)
+
+#close_areas['area'] = close_areas.geometry.area; irgendwie so integrieren. Spart Zeilen
 
 url = "https://tubcloud.tu-berlin.de/s/RHZJrN8Dnfn26nr/download/NUTS_RG_10M_2021_4326.geojson"
 nuts = gpd.read_file(url)
@@ -77,10 +82,6 @@ FiWa_Netz.crs = 'EPSG:25833'
 # Reproject to EPSG:3035
 FiWa_Netz = FiWa_Netz.to_crs(epsg=3035)
 
-# Now you can plot the GeoDataFrame
-#FiWa_Netz.plot(color='blue', linewidth=2)
-#plt.show()
-
 # Example: Spatial join with a maximum distance of 'y' meters
 max_distance = 10e3  # Set 'y' to your desired maximum distance
 close_areas = gpd.sjoin_nearest(joined, FiWa_Netz, max_distance=max_distance, distance_col='distance')
@@ -103,6 +104,40 @@ ax.legend()
 
 # Show the plot
 plt.show()
+
+#close_areas['area'] = close_areas.geometry.area
+min_area = 0.01  # Mindestfläche in Quadratmetern
+close_areas = close_areas[close_areas['area_wind'] >= min_area]
+
+
+buffer_size = 10  # Example buffer size in meters; adjust based on your requirements
+close_areas['buffered_geometry'] = close_areas.geometry.buffer(buffer_size)
+
+close_areas.plot()
+plt.show()
+
+# Create a single MultiPolygon from the buffered geometries
+G = nx.Graph()
+
+for index, row in close_areas.iterrows():
+    G.add_node(index, geometry=row['buffered_geometry'])
+
+# Add an edge between polygons that intersect
+for index1, geom1 in G.nodes(data='geometry'):
+    for index2, geom2 in G.nodes(data='geometry'):
+        if index1 != index2 and geom1.intersects(geom2):
+            G.add_edge(index1, index2)
+
+# Find connected components - these are your groups
+groups = list(nx.connected_components(G))
+
+new_geometries = [unary_union([G.nodes[i]['geometry'] for i in group]) for group in groups]
+
+combined_areas = gpd.GeoDataFrame({'geometry': new_geometries}, crs=close_areas.crs)
+
+combined_areas.plot()
+plt.show()
+
 """
 Hier neuer Abschnitt 
 """
@@ -114,7 +149,7 @@ excluder = ExclusionContainer(crs=3035)
 
 cutout = atlite.Cutout("Germany-2019.nc")
 
-A = cutout.availabilitymatrix(close_areas, excluder)
+A = cutout.availabilitymatrix(combined_areas, excluder)
 
 cap_per_sqkm = 2 # 2 MW/km^2
 area = cutout.grid.set_index(["y", "x"]).to_crs(3035).area / 1e6 # in km^2
@@ -123,7 +158,7 @@ area = xr.DataArray(area, dims=("spatial"))
 capacity_matrix = A.stack(spatial=["y", "x"]) * area * cap_per_sqkm
 
 cutout.prepare()
-wind = cutout.wind(matrix=capacity_matrix, turbine="Vestas_V90_3MW", index=close_areas.index)
+wind = cutout.wind(matrix=capacity_matrix, turbine="Vestas_V90_3MW", index=combined_areas.index)
 
 wind.isel(time=0).plot()
 plt.show()

@@ -18,14 +18,21 @@ dT = VLT - 40
 cp = 4186e-6
 p = 998
 e_nom_max_heat_storage = 100e6
+
 size = e_nom_max_heat_storage / (dT * cp * p)
 
-params = {
-    "fill_values": 0.0,  # Example value for fill_values
-    "r": 0.04,           # Example value for discount rate
-    "nyears": 1,           # Example value for the number of years
-    "year": 2020          # Example value for the year
-}
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
+
+params = config['params']
+
+# Accessing individual parameters
+fill_values = params['fill_values']
+r = params['r']
+nyears = params['nyears']
+year = params['year']
+
+cost_file = f"data/costs_{params['year']}.csv"
 
 #n.snapshot_weightings // nochmal gucken was ditte kann
 
