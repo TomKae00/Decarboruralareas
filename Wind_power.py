@@ -160,6 +160,12 @@ capacity_matrix = A.stack(spatial=["y", "x"]) * area * cap_per_sqkm
 cutout.prepare()
 wind = cutout.wind(matrix=capacity_matrix, turbine="Vestas_V90_3MW", index=combined_areas.index)
 
+print(wind.dims)
+
 wind.isel(time=0).plot()
 plt.show()
 
+total_wind_power = wind.sum(dim='time')
+max_power_index = total_wind_power.argmax(dim='dim_0')
+max_power_series = wind.isel(dim_0=max_power_index)
+wind_series_for_pypsa = max_power_series.to_series()

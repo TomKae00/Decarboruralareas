@@ -29,7 +29,12 @@ layers = [
     'bepo:Gemarkungen_Flussthermie',
     'bepo:Gemarkungen_Seethermie',
     'bepo:datenquellen',
-    'bepo:Ausschuss'
+    'bepo:Ausschuss',
+    'bepo:esb_mastr_cat_Wasser_MITTEL',
+    'bepo:esb_stromerzeugung_ee_wind',
+    'bepo:esb_waermekataster_gebaeude_energie_fernwaerme',
+    'bepo:esb_waermekataster_gebaeude_heizung_waermenetz',
+    'bepo:esb_lfuklima_heizgradtage'
 ]
 
 # Fetch and store layers in a dictionary
@@ -42,4 +47,9 @@ abwasser_df = layer_data['bepo:Gemarkungen_Abwasser']
 flussthermie_df = layer_data['bepo:Gemarkungen_Flussthermie']
 ausschluss_df = layer_data['bepo:Ausschuss']
 datenquellen_df = layer_data['bepo:datenquellen']
+wasser_MITTEL_df = layer_data['bepo:esb_mastr_cat_Wasser_MITTEL']
+stromerzeugung_wind_df = layer_data['bepo:esb_stromerzeugung_ee_wind']
+waermekataster_energie_fernwaerme_df = layer_data['bepo:esb_waermekataster_gebaeude_energie_fernwaerme']
+waermekataster_heizung_fernwaerme_df = layer_data['bepo:esb_waermekataster_gebaeude_heizung_waermenetz']
+heizgradtage_df = layer_data['bepo:esb_lfuklima_heizgradtage']
 # Perform data analysis or visualization with netze_df

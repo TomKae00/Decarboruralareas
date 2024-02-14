@@ -1,2 +1,8 @@
 selected_system_id: 'Brandenburg_Fernwaerme.1'  # The ID of the district heating system you want to analyze
-max_distance: 1000                              # The maximum distance for proximity analysis in meters
+max_distance: 1000   # The maximum distance for proximity analysis in meters
+
+params:
+  fill_values: 0.0
+  r: 0.02
+  nyears: 1
+  year: 2020

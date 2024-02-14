@@ -33,15 +33,15 @@ wfs = WebFeatureService(url=url, version='2.0.0')
 
 # Layers to be used
 layer_keys = [
-    'bepo:Gemarkungen_Abwasser',
-    'bepo:Gemarkungen_Abwaerme_Industrie',
-    'bepo:Eignung_EWK',
-    'bepo:Fläche_EWK',
+    #'bepo:Gemarkungen_Abwasser',
+    #'bepo:Gemarkungen_Abwaerme_Industrie',
+    #'bepo:Eignung_EWK',
+    #'bepo:Fläche_EWK',
     'bepo:Brandenburg_Fernwaerme',
     'bepo:Gemarkungen_Flussthermie',
     'bepo:Gemarkungen_Seethermie',
-    'bepo:datenquellen',
-    'bepo:Ausschuss'
+    #'bepo:datenquellen',
+    #'bepo:Ausschuss'
 ]
 
 # Fetch and store layers in a dictionary
@@ -52,7 +52,7 @@ for key in layer_data:
     layer_data[key] = reproject_to_crs(layer_data[key], 'EPSG:3035')
 
 # Snakemake parameters for selected system and max distance
-selected_system_id = 'Brandenburg_Fernwaerme.7'  # snakemake.config['selected_system_id']
+selected_system_id = 'Brandenburg_Fernwaerme.3'  # snakemake.config['selected_system_id']
 max_distance = 1000    # snakemake.config['max_distance']
 
 # Select the specific district heating system
@@ -65,7 +65,7 @@ potential_layer_keys = [
     #'bepo:Gemarkungen_Abwasser',
     #'bepo:Gemarkungen_Abwaerme_Industrie',
     'bepo:Gemarkungen_Flussthermie',
-    'bepo:Ausschuss'
+    'bepo:Gemarkungen_Seethermie'
 ]
 
 # Initialize an empty list to store close potential dataframes
@@ -80,6 +80,8 @@ for layer_key in potential_layer_keys:
 
 # Concatenate all dataframes in the list into a single GeoDataFrame
 all_close_potentials = pd.concat(all_close_potentials_list, ignore_index=True)
+
+all_close_potentials = all_close_potentials[all_close_potentials['WaermePot'] > 0]
 
 # Save the output to a file
 #all_close_potentials.to_file(snakemake.output.gpkg, driver="GPKG")

@@ -17,7 +17,7 @@ cutout = atlite.Cutout(
     module="era5",
     x=slice(4.8479, 15.8638),
     y=slice(55.2353, 46.9644),
-    time=slice("2019-01", "2019-12")
+    time=slice("2019-01", "2019-12"),
 )
 
 module = "era5"
@@ -56,14 +56,13 @@ temp_at_point = temp.sel(x=x_point, y=y_point, method='nearest')
 # Wandele die Xarray-Daten in eine Pandas Series um
 temperature_series = temp_at_point.to_series() - 273.15
 
+temperature_series.to_csv('data/temperature_series.csv', index=True)
+
 # Zeige die erstellte Serie an
 print(temperature_series)
 
 # change temperature_series from K to °C
 
-temperature_series_celsius = temperature_series - 273.15
-
-print(temperature_series_celsius)
 
 wind = cutout.data.wnd_azimuth
 wind_at_point = wind.sel(x=x_point, y=y_point, method='nearest')

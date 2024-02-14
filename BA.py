@@ -2,12 +2,12 @@
 import pypsa
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import yaml
 
 from weather_data import temperature_series
+from Wind_power import wind_series_for_pypsa
+from linearizing_costs import all_technologies_dfs
 
-#im optimize code direkt integrieren, dass eine dynamische Auswahl der Kosten möglich ist.
 
 # so nicht gut gelöst. Gucken dass diese Werte in def eingebracht werden und dann in einem Skript für die Parameter festgelegt werden
 T_out = temperature_series
@@ -33,14 +33,6 @@ nyears = params['nyears']
 year = params['year']
 
 cost_file = f"data/costs_{params['year']}.csv"
-
-#n.snapshot_weightings // nochmal gucken was ditte kann
-
-cost_file = f"data/costs_{params['year']}.csv"
-
-# Funktion für die Berechnung der Kosten, übernommen aus prepare_sector_network.py
-# Damit dies funktioniert muss noch noch calculate annuity aus add electricity übernommen werden
-
 
 def calculate_annuity(n, r):
     """
@@ -86,66 +78,89 @@ def prepare_costs(cost_file, params, nyears):
 
 result = prepare_costs(cost_file, params, params["nyears"])
 print(result)
+result.to_csv('data/result.csv', index=True)
+
+for technology_name, component_df in all_technologies_dfs.items():
+    if technology_name in result.index:
+        efficiency = result.at[technology_name, 'efficiency'] if 'efficiency' in result.columns else None
+        VOM = result.at[technology_name, 'VOM'] if 'VOM' in result.columns else None
+        FOM = result.at[technology_name, 'FOM'] if 'FOM' in result.columns else None
+        lifetime = result.at[technology_name, 'lifetime'] if 'lifetime' in result.columns else 20  # Default to 20 if not specified
+
+        # Update component_df
+        component_df['Efficiency'] = efficiency
+        component_df['VOM'] = VOM
+        component_df['FOM'] = FOM
+        component_df['lifetime'] = lifetime
+
+        def annuity_factor(v):
+            return calculate_annuity(v["lifetime"], params["r"]) + v["FOM"] / 100
+
+        # Calculate and update annuity for each component
+        component_df['annuity_factor'] = component_df.apply(annuity_factor, axis=1)
+
+        component_df["fixed"] = [
+            annuity_factor(v) * v["Constant Cost"] * nyears for i, v in component_df.iterrows()
+        ]  # .itterows macht genau das gleiche wie .apply
+
+for technology_name, df in all_technologies_dfs.items():
+    # Prepare a base name for the technology that's URL/variable-friendly (lowercase, underscores, no spaces)
+    base_name = technology_name.replace(' ', '_').lower()
+
+    # Generate new indices based on a sequential number, ensuring they are unique and descriptive
+    new_index = [f"{base_name}_{i + 1}" for i in range(len(df))]
+
+    # Update the DataFrame to include a 'name' column which will hold the new index names
+    df['name'] = new_index
+
+    # Use the 'name' column as the new index
+    df.set_index('name', inplace=True)
+
+    # Ensure the updated DataFrame is saved back in the dictionary
+    all_technologies_dfs[technology_name] = df
+
 
 date_input = "%Y-%m-%d %H:%M:%S" #bis jetzt unnötig, aber noch übernehmen damit Daten einfacher ausgelesen werden können
-
-plt.style.use("bmh") #an falscher Stelle
 
 # create PyPSA network
 n = pypsa.Network()
 # set time steps
 n.set_snapshots(pd.date_range(start="2019-01-01", end="2019-12-31", freq="h"))
+sns = n.snapshots
 
 # add a bus/region for electricity
-n.add("Bus", "windstrom")
-
-# capacity factor of the wind farm
-#das geht auch anders! gucken, wie man direkt eine Serie reinlädt, wahrscheinlich über index = snapshots
-wind_power_data = pd.read_csv('data/wind_power2.0.csv', sep=';', parse_dates=['timestamp'], date_format=date_input)
-wind_power_series = wind_power_data.set_index('timestamp')['wind_power']/1000
+n.add("Bus", "power")
 
 # add generator for wind generation
 n.add("Generator",
       "windfarm",
-      bus="windstrom",
-      capital_cost=100,
-      marginal_cost=140,
+      bus="power",
+      capital_cost=result.loc["onwind", "investment"],
+      marginal_cost=result.loc["onwind", "VOM"],
       p_nom_extendable=True,
-      p_set=wind_power_series)
+      p_max_pu=wind_series_for_pypsa)
       #p_max_pu=random_series)
 
 # add a bus for district heating
-n.add("Bus", "Waerme")
-n.add("Bus","H2")
-n.add("Bus", "battery_storage")
-n.add("Bus", "H2_storage")
-n.add("Bus", "hot_water_storage")
+n.add("Bus", "heat")
+#n.add("Bus", "hot_water_storage")
 
-
-def calculate_heat_storage_capacity(dT):
-    # Spezifische Wärmekapazität von Wasser in J/(kg*K)
-    return dT * cp * size
-
-
-# Berechne die gespeicherte Wärmemenge
-stored_heat = calculate_heat_storage_capacity(dT)
 
 # add hot water Storage
 n.add("Store",
       "Waerme_speicher",
-      bus="Waerme",
+      bus="heat",
       capital_cost=result.loc["central water tank storage", "fixed"],
       e_cyclic=True,
-      #e_nom_max=150,
-      #e_nom_min=0,
       e_nom_extendable=True,
-      #e_max_pu=1.1,
       standing_loss=0.01) #für die standing_loss recherche betreiben. was angenommen werden kann -> Formel suchen in der Literatur Recheche
+
+n.add("Bus", "battery_storage")
 
 n.add(
     "Link",
     "battery charger",
-    bus0='wind_power',
+    bus0='power',
     bus1='battery_storage',
     carrier="battery charger",
     # the efficiencies are "round trip efficiencies"
@@ -169,13 +184,44 @@ n.add(
     "Link",
     "battery discharger",
     bus0='battery_storage',
-    bus1='wind_power',
+    bus1='power',
     carrier="battery discharger",
     efficiency=result.loc["battery inverter", "efficiency"] ** 0.5,
     p_nom_extendable=True,
     #marginal_cost=result.loc["battery inverter", "marginal_cost"],
 )
 # add H2 storage
+n.add("Bus", "H2")
+n.add('Bus', 'Excess_heat')
+#n.add("Bus", "H2_storage")
+
+# add electrolysis for H2 production
+n.add("Link",
+      "Elektrolyse",
+      bus0="power",
+      bus1="H2",
+      bus2='Excess_heat',
+      capital_cost=result.loc["electrolysis AEC", "fixed"],
+      efficiency=result.at["electrolysis AEC", "efficiency"],
+      efficiency2=result.at["electrolysis AEC", "efficiency-heat"],
+      p_nom_extendable=True
+      )
+
+"""""
+Die Annahme stimmt soweit bus0 beschreibt mein input und jeglicher weiterer Bus outputs bzw. input wenn negativ. 
+Die efficiency wird in das Verhältnis gesetzt zum bus0 
+"""""
+
+#n.add('Link',
+#      'excess_heat_HP',
+#      bus0='Excess_heat',
+#      bus1='heat',
+#      bus2='power',
+#      capital_cost=result.loc["electrolysis", "fixed"],
+#      efficiency=(1/(cop-1))*cop,
+#      efficiency2=-1/(cop-1),
+#      p_nom_extendable=True
+#      )
 
 n.add("Store",
       "H2 Speicher",
@@ -184,130 +230,81 @@ n.add("Store",
       capital_cost=result.loc["hydrogen storage tank type 1 including compressor", "fixed"],
       e_nom_extendable=True)
 
-# add electrolysis for H2 production
-n.add("Link",
-      "Elektrolyse",
-      bus0="windstrom",
-      bus1="H2",
-      capital_cost=result.loc["electrolysis", "fixed"],
-      efficiency=result.at["electrolysis", "efficiency"],
-      p_nom_extendable=True)
-
 # add H2 boiler
 n.add("Link",
       "H2 Kessel",
       bus0="H2",
-      bus1="Waerme",
+      bus1="heat",
       p_nom_extendable=True,
       carrier="H2 turbine",
       efficiency=result.at["OCGT", "efficiency"],
       capital_cost=result.at["OCGT", "fixed"] * result.at["OCGT", "efficiency"])
 
-HP_data = f"data/HP_data_{params['year']}.csv"
 
+#n.add("Link",
+#      "Waermepumpe",
+#      bus0="power",
+#      bus1="heat",
+#      efficiency=cop, #3
+#      p_nom_extendable=True,
+#      #p_min_pu=0.001,
+#      capital_cost=result.loc["central air-sourced heat pump", "fixed"], #500
+#      )
 
-def costs_HP(HP_data, nyears, VLT):
-    costs_HP = pd.read_csv(HP_data)
+for technology_name, df in all_technologies_dfs.items():
+    new_index = [f"{technology_name.replace(' ', '_').lower()}_{i+1}" for i in range(len(df))]
+    df.insert(0, 'name', new_index, True)
+    df.set_index('name', inplace=True)
+    all_technologies_dfs[technology_name] = df
 
-    costs_HP['p_nom_max'] = costs_HP['p_nom_max'].apply(
-        lambda x: float('inf') if isinstance(x, str) and x.strip("'") == 'inf' else float(x))
-
-    costs_HP = costs_HP[(costs_HP['VLT'] >= VLT)]
-
-    # correct units to MW and EUR
-    costs_HP['investment'] *= 1e3
-
-    def annuity_factor_HP(v):
-        return calculate_annuity(v["lifetime"], params["r"]) + v["FOM"] / 100
-
-    costs_HP["annuity_factor"] = costs_HP.apply(annuity_factor_HP, axis=1)
-
-    costs_HP["fixed"] = [
-        annuity_factor_HP(v) * v["investment"] * nyears for i, v in costs_HP.iterrows()
-    ] # .itterows macht genau das gleiche wie .apply
-
-    return costs_HP
-
-
-HP_data_processed = costs_HP(HP_data, params["nyears"], VLT)
-new_index = [f"heat_pump_{i+1}" for i in range(len(HP_data_processed))]
-HP_data_processed.insert(0, 'name', new_index, True)
-HP_data_processed = HP_data_processed.set_index('name')
-
-
-#def calculate_cop(T_out, VLT):
-#    dT = VLT - T_out
-#    COP = 6.08 - 0.09 * dT + 0.0005 * dT**2
-#
-#    # Überprüfen Sie die Bedingung für jedes Element in der Series
-#    condition = T_out <= -5 + 273.15
-#
-#    # Setzen Sie den COP auf 0 für die Elemente, die die Bedingung erfüllen
-#    if isinstance(COP, pd.Series):
-#        COP[condition] = 0
-#    elif COP > 0 and condition:
-#        COP = 0
-#
-#    return COP
-#
-#
-#cop = calculate_cop(T_out, VLT)
-#print(cop)
-
-t_lm_sink = (VLT-RLT)/(np.log((VLT+273.15)/(RLT+273.15)))
-t_lm_source = (T_out-dT_HP)/(np.log((T_out+273.15)/(dT_HP+273.15)))
-n_lorenz = 0.5
-
-def calculate_cop(T_out, t_lm_sink, t_lm_source, n_lorenz):
-    # Calculate COP based on the Lorenz cycle
-    COP_lorenz = t_lm_sink / (t_lm_sink - t_lm_source)
-    COP = COP_lorenz * n_lorenz
-
-    # Condition to check if T_out is below -5 degrees Celsius
-    condition = T_out <= -5
-
-    # Handle both Series and scalar values of T_out
-    if isinstance(T_out, pd.Series):
-        COP[condition] = 0
-    elif condition:
-        COP = 0
-
-    return COP
-
-
-cop = calculate_cop(T_out, t_lm_sink, t_lm_source, n_lorenz)
-
-# add heat pump
-# use central air line 496
-# calculating COP
-
-n.add("Link",
-      "Waermepumpe",
-      bus0="windstrom",
-      bus1="Waerme",
-      efficiency=cop, #3
-      p_nom_extendable=True,
-      #p_min_pu=0.001,
-      capital_cost=result.loc["central air-sourced heat pump", "fixed"], #500
-      )
-
+if "central air sourced heat pump" in all_technologies_dfs:
+    central_air_heat_pump_df = all_technologies_dfs["central air sourced heat pump"]
 n.madd("Link",
-       HP_data_processed.index,
-       bus0=["windstrom"],  # Assuming all heat pumps are connected to the same bus
-       bus1=["Waerme"],    # Assuming all heat pumps supply to the same bus
+       central_air_heat_pump_df.index,
+       bus0=["power"],  # Assuming all heat pumps are connected to the same bus
+       bus1=["heat"],    # Assuming all heat pumps supply to the same bus
        p_nom_extendable=True,
-       p_nom_min=HP_data_processed["p_nom_min"],
-       p_nom_max=HP_data_processed["p_nom_max"],
+       #p_nom_min=HP_data_processed["p_nom_min"],
+       #p_nom_max=HP_data_processed["p_nom_max"],
        #p_min_pu=HP_data_processed["p_min_pu"],                               # Assuming the same for all heat pumps
-       efficiency=4,                            # Assuming the same efficiency for all; replace if varying
-       capital_cost=HP_data_processed["fixed"]
+       efficiency=3,                            # Assuming the same efficiency for all; replace if varying
+       capital_cost=central_air_heat_pump_df["fixed"]
        )
+
+
+def heat_pump_constraints(n, sns):
+    if not n.links.p_nom_extendable.any():
+        return
+
+    n.model.add_variables(coords=[central_air_heat_pump_df.index], name="Link-build", binary=True)
+    # Retrieve the binary variable
+    binary_var = n.model["Link-build"]
+    print(binary_var)
+
+    # Get the variable p_nom_opt for the heat pumps
+    p_nom_opt = n.model["Link-p_nom"].loc[central_air_heat_pump_df.index]
+    print(p_nom_opt)
+
+    # Read p_nom_min from your processed data
+    p_nom_min = central_air_heat_pump_df["Start Capacity"].loc[central_air_heat_pump_df.index]
+    print(p_nom_min)
+
+    m = 50
+
+    for hp in central_air_heat_pump_df.index:
+        n.model.add_constraints(p_nom_opt[hp] - binary_var[hp] * m <= 0,
+                                name=f"Link-p_nom-upperlimit-{hp}")
+
+        # Constraint 2: If binary_var is 0, p_nom_opt_pump must be 0
+        n.model.add_constraints(p_nom_opt[hp] - binary_var[hp] * m >= p_nom_min[hp] - m,
+                                name=f"Link-p_nom-lowerlimit-{hp}")
+
 
 # add e-boiler
 n.add("Link",
       "E-Kessel",
-      bus0="windstrom",
-      bus1="Waerme",
+      bus0="power",
+      bus1="heat",
       efficiency=result.loc["electric boiler steam", "efficiency"],
       capital_cost=result.loc["electric boiler steam", "fixed"],
       marginal_cost=result.loc["electric boiler steam", "VOM"],
@@ -320,8 +317,8 @@ heat_demand_series = heat_demand_data.set_index('timestamp')['heat_demand']/1000
 heat_demand_sum = heat_demand_series.sum()
 # add demand
 n.add("Load",
-      "Fernwaerme Nachfrage",
-      bus="Waerme",
+      "heat_demand",
+      bus="heat",
       p_set=heat_demand_series)
 
 # Specify the solver options
@@ -330,9 +327,17 @@ solver_options = {
         'BarHomogeneous': 1  # Setting BarHomogeneous parameter for Gurobi
     }
 }
+c = 'link'  # Replace with the actual component name
 
-# Run the optimization with the specified solver and options
-n.optimize(solver_name="gurobi", solver_options=solver_options)
+if 'build_opt' not in n.links.columns:
+    n.links['build_opt'] = 0  # Initialize with a default value (e.g., 0)
+
+
+n.optimize(n.snapshots, extra_functionality=heat_pump_constraints,
+               solver_name="gurobi", solver_options=solver_options)
+print("Optimization completed successfully")
+
+#binary_results = n.model["Link-build"].solution.to_pandas()
 
 
 # optimal capacities wind warm
@@ -359,18 +364,14 @@ n.export_to_csv_folder("results")
 print("csv exported sucessfully")
 
 links = n.links
+components = n.components
+
 
 total_system_cost = n.objective
 print("Total System Cost:", total_system_cost)
 print(n.investment_period_weightings)
-wärmegestehungskosten = total_system_cost/heat_demand_sum
-print("Wärmegestehungskosten:", wärmegestehungskosten)
+waermegestehungskosten = total_system_cost/heat_demand_sum
+print("Wärmegestehungskosten:", waermegestehungskosten)
 print(heat_demand_sum)
 
-
-#more to com
-
-#Netzverlsute intgrieren
-
-#Consider using the
-#homogeneous algorithm (through parameter 'BarHomogeneous')
+# Netzverlsute intgrieren
