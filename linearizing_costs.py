@@ -6,7 +6,7 @@ from cost_functions import cop_series
 from cost_functions import temperature_series_map
 
 heat_pumps_params = {
-    "lower_limit": 0,
+    "lower_limit": 50,
     "upper_limit": 15000,
     "error_threshold": 30  # Default for demonstration, adjust as necessary
 }
@@ -149,7 +149,13 @@ source_to_technology_name = {
 all_technologies_dfs = {}
 
 for component_name, df in component_dfs.items():
+
+    df['Start Capacity'] = df['Start Capacity'] / 1000  # Convert kW to MW
+    df['End Capacity'] = df['End Capacity'] / 1000  # Convert kW to MW
+    df['Constant Cost'] = df['Constant Cost'] * 1000  # Convert €/kW to €/MW
+
     source = component_name.split("_")[0]
+
     if source in source_to_technology_name:
         technology_name = source_to_technology_name[source]
         df['Technology'] = technology_name  # Add 'Technology' column before aggregation

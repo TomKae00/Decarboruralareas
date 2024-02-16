@@ -48,15 +48,15 @@ for source_type in available_sources:
     T_source_c, T_source_c_mean, dT_lift_k, dT_lift_k_mean, COP_carnot = calculate_for_source(source_type)
 
 
-def calculate_intermediate_max_supply_temp_R717(T_source):
-    if T_source < 51.20:
-        T_supply_COP_max = 44.6 + 0.9928 * T_source
+def calculate_intermediate_max_supply_temp_R717(T_source_c_mean):
+    if T_source_c_mean < 51.20:
+        T_supply_COP_max = 44.6 + 0.9928 * T_source_c_mean
     else:
-        T_supply_COP_max = 104.20 - 0.1593 * T_source
-    if T_source < 60.35:
-        T_supply_TCI_min = 28.50 + 0.859 * T_source
+        T_supply_COP_max = 104.20 - 0.1593 * T_source_c_mean
+    if T_source_c_mean < 60.35:
+        T_supply_TCI_min = 28.50 + 0.859 * T_source_c_mean
     else:
-        T_supply_TCI_min = 87.26 - 0.1102 * T_source
+        T_supply_TCI_min = 87.26 - 0.1102 * T_source_c_mean
     T_supply_intermediate = (T_supply_COP_max + T_supply_TCI_min) / 2
     return T_supply_intermediate
 

@@ -4,52 +4,61 @@ import pandas as pd
 import io
 import snakemake
 import matplotlib.pyplot as plt
+import os
 
 
 # Function to fetch data from the WFS service and load into a GeoDataFrame
-def fetch_layer(wfs, layer_name):
-    response = wfs.getfeature(typename=layer_name, outputFormat='json')
-    data = io.BytesIO(response.read())
-    return gpd.read_file(data)
+def fetch_layer_and_save(wfs, layer_name, filepath):
+    if not os.path.exists(filepath):  # Check if file already exists to avoid re-downloading
+        response = wfs.getfeature(typename=layer_name, outputFormat='json')
+        data = io.BytesIO(response.read())
+        gdf = gpd.read_file(data)
+        gdf = gdf.to_crs('EPSG:3035')  # Reproject before saving
+        gdf.to_file(filepath, driver='GeoJSON')
+
+url = 'https://energieportal-brandenburg.de/geoserver/bepo/ows'
+wfs = WebFeatureService(url=url, version='2.0.0')
+
+layer_info = {
+    'bepo:Brandenburg_Fernwaerme': 'data/energieportal/brandenburg_fernwaerme.json',
+    'bepo:Gemarkungen_Flussthermie': 'data/energieportal/gemarkungen_flussthermie.json',
+    'bepo:Gemarkungen_Seethermie': 'data/energieportal/gemarkungen_seethermie.json',
+}
+
+# Layers to be used
+#layer_keys = [
+#    #'bepo:Gemarkungen_Abwasser',
+#    #'bepo:Gemarkungen_Abwaerme_Industrie',
+#    #'bepo:Eignung_EWK',
+#    #'bepo:Fläche_EWK',
+#    'bepo:Brandenburg_Fernwaerme',
+#    'bepo:Gemarkungen_Flussthermie',
+#    'bepo:Gemarkungen_Seethermie',
+#    #'bepo:datenquellen',
+#    #'bepo:Ausschuss'
+#]
+
+for key, filepath in layer_info.items():
+    fetch_layer_and_save(wfs, key, filepath)
 
 
-# Function to reproject GeoDataFrame to a given CRS
-def reproject_to_crs(gdf, crs):
-    return gdf.to_crs(crs)
+def load_layer_from_geojson_and_reproject(filepath, target_crs):
+    gdf = gpd.read_file(filepath)
+    # Reproject to the target CRS
+    return gdf.to_crs(target_crs)
 
 
-# Function to find close potentials within a specified distance
+target_crs = 'EPSG:3035'
+
+# Load layers from GeoJSON files into a dictionary and reproject
+layer_data = {key: load_layer_from_geojson_and_reproject(filepath, target_crs) for key, filepath in layer_info.items()}
+
+
 def find_close_potentials(potential_gdf, system_geom, distance):
     search_area = system_geom.buffer(distance)
     close_potentials = potential_gdf[potential_gdf.intersects(search_area)]
     return close_potentials
 
-
-# URL of the WFS service
-url = 'https://energieportal-brandenburg.de/geoserver/bepo/ows'
-
-# Connect to the WFS
-wfs = WebFeatureService(url=url, version='2.0.0')
-
-# Layers to be used
-layer_keys = [
-    #'bepo:Gemarkungen_Abwasser',
-    #'bepo:Gemarkungen_Abwaerme_Industrie',
-    #'bepo:Eignung_EWK',
-    #'bepo:Fläche_EWK',
-    'bepo:Brandenburg_Fernwaerme',
-    'bepo:Gemarkungen_Flussthermie',
-    'bepo:Gemarkungen_Seethermie',
-    #'bepo:datenquellen',
-    #'bepo:Ausschuss'
-]
-
-# Fetch and store layers in a dictionary
-layer_data = {key: fetch_layer(wfs, key) for key in layer_keys}
-
-# Reproject layers to the specified CRS (EPSG:3035)
-for key in layer_data:
-    layer_data[key] = reproject_to_crs(layer_data[key], 'EPSG:3035')
 
 # Snakemake parameters for selected system and max distance
 selected_system_id = 'Brandenburg_Fernwaerme.3'  # snakemake.config['selected_system_id']
