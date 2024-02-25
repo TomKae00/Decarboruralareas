@@ -106,7 +106,7 @@ ax.legend()
 plt.show()
 
 #close_areas['area'] = close_areas.geometry.area
-min_area = 0.01  # Mindestfläche in Quadratmetern
+min_area = 0.1  # Mindestfläche in Quadratmetern
 close_areas = close_areas[close_areas['area_wind'] >= min_area]
 
 

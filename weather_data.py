@@ -26,13 +26,6 @@ x = slice(4.8479, 15.8638) # Longitude
 y = slice(55.2353, 46.9644) # Latitude
 cutout.prepare()
 
-# weiter gucken was dies kann übernommen von https://github.com/PyPSA/pypsa-eur/blob/f3832521c424ddebd33c50a35aecfc9979707bdf/scripts/build_cutout.py#L43-L79
-
-#logging.getLogger(__name__)
-#if __name__ == "__main__":
-#    if "snakemake" not in globals():
-#        from _helpers import mock_snakemake
-
 # get data
 temp = cutout.data.temperature
 print(temp)

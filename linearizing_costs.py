@@ -8,15 +8,15 @@ from cost_functions import temperature_series_map
 heat_pumps_params = {
     "lower_limit": 50,
     "upper_limit": 15000,
-    "error_threshold": 30  # Default for demonstration, adjust as necessary
+    "error_threshold": 20  # Default for demonstration, adjust as necessary
 }
 
 component_parameters = {
     "central electric boiler": {"lower_limit": 150, "upper_limit": 20000, "error_threshold": 5},
-    "electrolysis AEC": {"lower_limit": 5000, "upper_limit": 1e6, "error_threshold": 5},
-    "electrolysis PEMEC": {"lower_limit": 5000, "upper_limit": 1e6, "error_threshold": 5},
-    "central gas boiler": {"lower_limit": 10, "upper_limit": 20000, "error_threshold": 5},
-    "central H2 boiler": {"lower_limit": 10, "upper_limit": 20000, "error_threshold": 5},
+    "electrolysis AEC": {"lower_limit": 1000, "upper_limit": 1e6, "error_threshold": 20},
+    "electrolysis PEMEC": {"lower_limit": 1000, "upper_limit": 1e6, "error_threshold": 20},
+    "central gas boiler": {"lower_limit": 10, "upper_limit": 20000, "error_threshold": 20},
+    "central H2 boiler": {"lower_limit": 10, "upper_limit": 20000, "error_threshold": 20},
     # Add other components with lower_limit as needed
 }
 
@@ -144,6 +144,7 @@ source_to_technology_name = {
     "Luft": "central air sourced heat pump",
     "Flussthermie": "central sourced-water heat pump",
     "Seethermie": "central sourced-sea heat pump",
+    "Abwaerme": "central excess-heat heat pump"
 }
 
 all_technologies_dfs = {}

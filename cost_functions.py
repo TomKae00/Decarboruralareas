@@ -6,6 +6,17 @@ from weather_data import temperature_series
 from data_Energieportal3 import all_close_potentials
 
 
+"""
+Implementieren what the flip flop meine Bivalenztemperatur oder Auslegungstemperatur ist. Diese kann dabei minimale
+Außentemperatur sein, eine beliebige temperatur oder die minimale vorgeschriebene Auslegungstemperatur. Darauf basierend 
+werden die Kosten festgelegt, da die Wärmepumpen Leistung für diesen Punkt festgelegt ist. Dann COP an diesem Punkt
+bestimmen und mit diesem durch die MW_th teilen. NICHT durch die Kosten teilen, da der output MW_th witerhin ist. Also
+doch gucken welche Vorschriften es nach der EN 14511 gibt und ab wann man von der Leistung MW_th bei Wärmepumpen
+spricht (also bei welchen Bedingungen). Doch bullshit, ich muss mit T_supply festlegen bei wlechen Bedingungen 1000kW 
+erreiche. Die perfekte Auslegung hieraus zu erkennen als Ausblick definieren!
+"""
+
+
 def load_data(file_path):
     """Load data from CSV file and set the first column as index."""
     return pd.read_csv(file_path, index_col=0)
@@ -17,46 +28,63 @@ parameters_tci = load_data('data/table_3_data.csv')
 costs_data = pd.read_csv('data/costs_function_2025.csv')
 
 unique_sources_from_df = all_close_potentials['Art'].unique()
-available_sources = np.unique(np.append(unique_sources_from_df, "Luft"))
+available_sources = np.unique(np.append(unique_sources_from_df, ["Luft", "Abwaerme"]))
 
 temperature_series_outside = temperature_series  # Pandas series for outside temperature
 temperature_series_flussthermie = temperature_series + 5  # Pandas series for Flussthermie temperature
 temperature_series_seethermie = temperature_series + 7  # Pandas series for Seethermie temperature
+temperature_series_abwaerme = pd.Series(50, index=temperature_series.index)
 
 # Map of source types to their temperature series
 temperature_series_map = {
     'Luft': temperature_series_outside,
     'Flussthermie': temperature_series_flussthermie,
     'Seethermie': temperature_series_seethermie,
+    'Abwaerme': temperature_series_abwaerme
+}
+
+min_temp_thresholds = {
+    'Luft': 0,  # Example threshold
+    'Flussthermie': 0,
+    'Seethermie': 0,
+    'Abwaerme': 0  # Adjust these values as needed
 }
 
 
 T_supply_k = 60 + 273.15
 
+# Auslegung der Quelltemperautr minimal für die Kosten der Wärmepumpen
+# Ausschalttemperautr für Luft implementieren 5°C, 0°, -5°, -10° als varibale integrieren Designtemperatur und gucken wie Ergebnisse sich verändern
+
 def calculate_for_source(source_type):
     # Access the correct temperature series for the current source type
     T_source_c = temperature_series_map[source_type]
-    T_source_c_mean = T_source_c.mean()
-    dT_lift_k = T_supply_k - (T_source_c + 273.15)
-    dT_lift_k_mean = dT_lift_k.mean()
-    COP_carnot = T_supply_k / dT_lift_k
+    T_source_c_min = T_source_c.min()
 
-    return T_source_c, T_source_c_mean, dT_lift_k, dT_lift_k_mean, COP_carnot
+    min_temp_threshold = min_temp_thresholds[source_type]  # Get the threshold for the current source type
+    if T_source_c_min < min_temp_threshold:
+        T_source_c_min = min_temp_threshold
+
+    dT_lift = T_supply_k - (T_source_c + 273.15)
+    dT_lift_k_min = T_supply_k - (T_source_c_min + 273.15)
+    COP_carnot = T_supply_k / dT_lift
+
+    return T_source_c, T_source_c_min, dT_lift, dT_lift_k_min, COP_carnot
 
 
 for source_type in available_sources:
-    T_source_c, T_source_c_mean, dT_lift_k, dT_lift_k_mean, COP_carnot = calculate_for_source(source_type)
+    T_source_c, T_source_c_min, dT_lift, dT_lift_k_min, COP_carnot = calculate_for_source(source_type)
 
 
-def calculate_intermediate_max_supply_temp_R717(T_source_c_mean):
-    if T_source_c_mean < 51.20:
-        T_supply_COP_max = 44.6 + 0.9928 * T_source_c_mean
+def calculate_intermediate_max_supply_temp_R717(T_source_c_min):
+    if T_source_c_min < 51.20:
+        T_supply_COP_max = 44.6 + 0.9928 * T_source_c_min
     else:
-        T_supply_COP_max = 104.20 - 0.1593 * T_source_c_mean
-    if T_source_c_mean < 60.35:
-        T_supply_TCI_min = 28.50 + 0.859 * T_source_c_mean
+        T_supply_COP_max = 104.20 - 0.1593 * T_source_c_min
+    if T_source_c_min < 60.35:
+        T_supply_TCI_min = 28.50 + 0.859 * T_source_c_min
     else:
-        T_supply_TCI_min = 87.26 - 0.1102 * T_source_c_mean
+        T_supply_TCI_min = 87.26 - 0.1102 * T_source_c_min
     T_supply_intermediate = (T_supply_COP_max + T_supply_TCI_min) / 2
     return T_supply_intermediate
 
@@ -65,28 +93,28 @@ def calculate_intermediate_max_supply_temp_R717(T_source_c_mean):
 """""
 R717 needs to be calculated for T_source_c so for every component given. Needs to be adjusted at the moment not correct
 """""
-def calculate_max_supply_temperatures(T_source_c_mean):
+def calculate_max_supply_temperatures(T_source_c_min):
     """Calculate and return the max supply temperatures for various fluids including R717."""
-    temps = {'R290': 99.7, 'R1234yf': 95.3, 'R134a': 101.7, 'R600a': 137.3, 'R600': 154.9, 'R245fa': 154.8,
-             'R717': calculate_intermediate_max_supply_temp_R717(T_source_c_mean)}
+    temps = {'R290': 99.7, 'R134a': 101.7, 'R600a': 137.3, 'R600': 154.9, 'R245fa': 154.8, #'R1234yf': 95.3,
+             'R717': calculate_intermediate_max_supply_temp_R717(T_source_c_min)}
     # Convert to Kelvin
     return {fluid: temp + 273.15 for fluid, temp in temps.items()}
 
 
-max_supply_temps_k = calculate_max_supply_temperatures(T_source_c_mean)
+max_supply_temps_k = calculate_max_supply_temperatures(T_source_c_min)
 
 
-def check_constraints(fluid, T_supply):
+def check_constraints(fluid, T_supply_k):
     if fluid == 'R717':
-        T_supply_intermediate = calculate_intermediate_max_supply_temp_R717(T_source_c_mean)
-        return T_supply <= max_supply_temps_k[fluid] and T_supply <= T_supply_intermediate
+        T_supply_intermediate = calculate_intermediate_max_supply_temp_R717(T_source_c_min)
+        return T_supply_k <= max_supply_temps_k[fluid] and T_supply_k <= T_supply_intermediate
     else:
-        return fluid in max_supply_temps_k and T_supply <= max_supply_temps_k[fluid]
+        return fluid in max_supply_temps_k and T_supply_k <= max_supply_temps_k[fluid]
 
 
-def calculate_tci_strich_1000(D, E, F, T_supply, dT_lift_k_mean):
+def calculate_tci_strich_1000(D, E, F, T_supply_k, dT_lift_k_min):
     """Calculate TCI for a 1000 kW heat pump."""
-    return D + E * dT_lift_k_mean + F * T_supply
+    return D + E * dT_lift_k_min + F * T_supply_k
 
 
 # Calculation Functions
@@ -95,29 +123,37 @@ def calculate_scaled_tci(TCI_strich_1000, alpha, X_kW_th):
     return TCI_strich_1000 * (X_kW_th / 1000) ** alpha
 
 
-def calculate_COP_1000(G, H, I, J, K, T_supply, dT_lift):
-    """Calculate COP based on parameters and supply/dT_lift conditions."""
-    return G + H * dT_lift + I * T_supply + J * dT_lift**2 + K * T_supply * dT_lift
+def calculate_COP_1000(G, H, I, J, K, T_supply_k, dT_lift, T_source_c, min_temp_threshold):
+    """Calculate COP based on parameters, supply/dT_lift conditions, and a minimum temperature threshold."""
+    COP_series = pd.Series(index=T_source_c.index, dtype=float)
 
+    # Vectorized condition: Set COP to 0 if T_source_c is below the min_temp_threshold
+    condition = T_source_c < min_temp_threshold
+    COP_series[condition] = 0
+
+    # For temperatures above the threshold, calculate the COP
+    not_condition = ~condition
+    COP_series[not_condition] = G + H * dT_lift[not_condition] + I * T_supply_k + J * dT_lift[not_condition]**2 + K * T_supply_k * dT_lift[not_condition]
+
+    return COP_series
 
 def calculate_additional_costs(size_mw):
     """Calculate construction, electricity, and heat source investment costs in euros."""
     construction_cost = (0.084311 * size_mw + 0.021769) * 1e6  # Convert from Mio. EUR to EUR
     electricity_cost = (0.12908 * size_mw + 0.01085) * 1e6  # Convert from Mio. EUR to EUR
-    heat_source_cost = (0.12738 * size_mw + 5.5007e-6) * 1e6  # Convert from Mio. EUR to EUR
+    if source_type == 'Luft':
+        heat_source_cost = (0.12738 * size_mw + 5.5007e-6) * 1e6
+    elif source_type == 'Abwaerme':
+        heat_source_cost = (0.091068 * size_mw + 0.10846) * 1e6
+    elif source_type == 'Seethermie':
+        heat_source_cost = (0.12738 * size_mw + 5.5007e-6) * 1e6 #keine richtigen WERTE sondern die für gw
+    elif source_type == 'Flussthermie':
+        heat_source_cost = (0.12738 * size_mw + 5.5007e-6) * 1e6 #keine richtigen WERTE sondern die für gw
+    else:
+        raise ValueError("Invalid source type")
     return construction_cost, electricity_cost, heat_source_cost
 
 
-"""""
-def heat_source_investment_costs(x, source_type):
-    # Heat source investment costs (Mio. EUR) differ based on the source type
-    if source_type == 'air':
-        return 0.12738 * x + 5.5007e-6
-    elif source_type == 'excess_heat':
-        return 0.091068 * x + 0.10846
-    else:
-        raise ValueError("Invalid source type")
-"""""
 cop_series = {}
 results = {}
 
@@ -125,8 +161,10 @@ results = {}
 sizes_kw_th = np.arange(0, 5001, 100)  # Heat pump sizes from 0 to 5000 kW_th
 
 for source_type in available_sources:
+
+    min_temp_threshold = min_temp_thresholds[source_type]
     # Calculate source-specific parameters
-    T_source_c, T_source_c_mean, dT_lift_k, dT_lift_k_mean, COP_carnot = calculate_for_source(source_type)
+    (T_source_c, T_source_c_min, dT_lift, dT_lift_k_min, COP_carnot) = calculate_for_source(source_type)
 
     # Initialize storage for source-specific calculations
     results[source_type] = {}
@@ -139,14 +177,14 @@ for source_type in available_sources:
         D, E, F, G, H, I, J, K, alpha = parameters_tci.loc[['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'α'], fluid].values
 
         cop_series[source_type][fluid] = {'COP': []}  # Initialize COP list for the fluid
-        COP_1000 = calculate_COP_1000(G, H, I, J, K, T_supply_k, dT_lift_k)
+        COP_1000 = calculate_COP_1000(G, H, I, J, K, T_supply_k, dT_lift, T_source_c, min_temp_threshold)
         cop_series[source_type][fluid]['COP'].append(COP_1000)
 
         results[source_type][fluid] = {'TCI': [], 'Total Investment Costs': [], 'Specific Costs': []}
         for size_kw_th in sizes_kw_th:
             size_mw = size_kw_th / 1000  # Convert kW_th to MW
 
-            TCI_strich_1000 = calculate_tci_strich_1000(D, E, F, T_supply_k, dT_lift_k_mean)
+            TCI_strich_1000 = calculate_tci_strich_1000(D, E, F, T_supply_k, dT_lift_k_min)
             scaled_tci = calculate_scaled_tci(TCI_strich_1000, alpha, size_kw_th)
 
             construction_cost, electricity_cost, heat_source_cost = calculate_additional_costs(size_mw)
@@ -195,7 +233,7 @@ for source, fluids in average_cop_source_fluid.items():
 selected_fluids_per_source = {}
 for source, fluids in efficiency_cost_ratio_source_fluid.items():
     best_ratio = max(fluids.values())
-    tolerance = 0.01  # 10%
+    tolerance = 0.05  # 10%
     selected_fluids_per_source[source] = {fluid: ratio for fluid, ratio in fluids.items() if ratio >= (1-tolerance) * best_ratio}
 
 # Convert the selected fluids to a DataFrame for easier analysis and display
