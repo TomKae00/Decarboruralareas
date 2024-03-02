@@ -1,13 +1,13 @@
 # import packages
 import pypsa
 import pandas as pd
-import numpy as np
 import yaml
 
 from weather_data import temperature_series
 from Wind_power import wind_series_for_pypsa
 from linearizing_costs import all_technologies_dfs
 from heat_demand import thh_series
+from data_Energieportal3 import max_potentials
 from cost_functions import cop_series
 
 # so nicht gut gelöst. Gucken dass diese Werte in def eingebracht werden und dann in einem Skript für die Parameter festgelegt werden
@@ -16,6 +16,9 @@ VLT = 70
 RLT = 35
 dT_HP = 4  # Abkühlung der Quelltemperatur
 dT = VLT - 40
+
+start_date = "2019-01-01"
+end_date = "2019-12-31 23:00"
 
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
@@ -79,19 +82,12 @@ result.to_csv('data/result.csv', index=True)
 
 for technology_name, component_df in all_technologies_dfs.items():
     if technology_name in result.index:
-        efficiency = result.at[technology_name, 'efficiency'] if 'efficiency' in result.columns else None
-        VOM = result.at[technology_name, 'VOM'] if 'VOM' in result.columns else None
-        FOM = result.at[technology_name, 'FOM'] if 'FOM' in result.columns else None
-        lifetime = result.at[
-            technology_name, 'lifetime'] if 'lifetime' in result.columns else 20  # Default to 20 if not specified
-        efficiency_heat = result.at[technology_name, 'efficiency-heat'] if 'efficiency-heat' in result.columns else None
-
-        # Update component_df
-        component_df['efficiency'] = efficiency
-        component_df['VOM'] = VOM
-        component_df['FOM'] = FOM
-        component_df['lifetime'] = lifetime
-        component_df['efficiency-heat'] = efficiency_heat
+        if technology_name in result.index:
+            tech_params = result.loc[technology_name]
+            # Update parameters directly without iterating over rows if possible
+            for param in ['efficiency', 'VOM', 'FOM', 'lifetime', 'efficiency-heat']:
+                if param in tech_params:
+                    component_df[param] = tech_params[param]
 
 
         def annuity_factor(v):
@@ -111,7 +107,69 @@ for technology_name, df in all_technologies_dfs.items():
     df.set_index('name', inplace=True)
     all_technologies_dfs[technology_name] = df
 
-date_input = "%Y-%m-%d %H:%M:%S"  # bis jetzt unnötig, aber noch übernehmen damit Daten einfacher ausgelesen werden können
+
+def calculate_cop(technology_df, cop_series):
+    cop_df = pd.DataFrame(index=pd.date_range(start=start_date, end=end_date, freq="h"))
+    for name, row in technology_df.iterrows():
+        parts = row['cop_series'].split('_')
+        if len(parts) >= 2:
+            source_type, fluid = parts[0], '_'.join(parts[1:])
+            if source_type in cop_series and fluid in cop_series[source_type]:
+                series_list = cop_series[source_type][fluid]
+                if series_list and series_list[0].index.equals(cop_df.index):
+                    cop_df[name] = series_list[0]
+    return cop_df
+
+
+def update_capacity(technology_df, cop_df):
+    for name, row in technology_df.iterrows():
+        if name in cop_df.columns:
+            min_cop = cop_df[cop_df[name] > 0][name].min()
+            technology_df.at[name, 'Start Capacity'] /= min_cop
+            technology_df.at[name, 'End Capacity'] /= min_cop
+
+
+def calculate_average_waermepot(max_potentials, type_name, start_date, end_date, freq):
+    """
+    Create a Pandas Series for a specified type with timestamps as the index and constant values.
+
+    Parameters:
+    - max_potentials: DataFrame containing the rows with maximum 'WaermePot' for each type.
+    - type_name: The type of potential for which to create the series ('Flussthermie' or 'Seethermie').
+    - start_date: Start date for the date range.
+    - end_date: End date for the date range.
+    - freq: Frequency for the date range.
+
+    Returns:
+    A Pandas Series for the specified type.
+    """
+
+    if type_name in max_potentials['Art'].values:
+        # Filter for the specified type
+        max_potential_row = max_potentials[max_potentials['Art'] == type_name]
+
+        # Assuming there's only one max value per type, get the 'WaermePot' value
+        waermepot_value = max_potential_row['WaermePot'].iloc[0]
+
+        # Create the date range
+        timestamps = pd.date_range(start=start_date, end=end_date, freq=freq)
+
+        # Calculate the constant value for 'WaermePot' divided by total hours in the range
+        total_hours = len(timestamps)
+        average_waermepot = waermepot_value / total_hours
+
+        # Create and return the series
+        return average_waermepot
+    else:
+        print(f"Skipping '{type_name}' as it is not present in max_potentials.")  # Raise a comment
+        return None  # Indicate absence of data for this type
+
+
+# To get the series for 'Flussthermie'
+flussthermie_value = calculate_average_waermepot(max_potentials, 'Flussthermie', start_date, end_date, "h")
+
+# To get the series for 'Seethermie'
+seethermie_value = calculate_average_waermepot(max_potentials, 'Seethermie', start_date, end_date, "h")
 
 """""
 At this point the creation of the network starts. 
@@ -120,7 +178,7 @@ At this point the creation of the network starts.
 # create PyPSA network
 n = pypsa.Network()
 # set time steps
-n.set_snapshots(pd.date_range(start="2019-01-01", end="2019-12-31 23:00", freq="h"))
+n.set_snapshots(pd.date_range(start=start_date, end=end_date, freq="h"))
 sns = n.snapshots
 
 # add a bus/region for electricity
@@ -137,7 +195,6 @@ n.add("Generator",
       p_nom_extendable=True,
       p_max_pu=wind_series_for_pypsa)
 
-
 n.add("Bus", "hot water storage")
 
 n.add('Link',
@@ -145,7 +202,7 @@ n.add('Link',
       bus0='heat',
       bus1='hot water storage',
       efficiency=result.loc["water tank charger", "efficiency"],
-      p_nom_extandable=True
+      p_nom_extendable=True
       )
 
 n.add('Link',
@@ -153,7 +210,7 @@ n.add('Link',
       bus0='hot water storage',
       bus1='heat',
       efficiency=result.loc["water tank discharger", "efficiency"],
-      p_nom_extandable=True
+      p_nom_extendable=True
       )
 
 # add hot water Storage
@@ -163,7 +220,7 @@ n.add("Store",
       capital_cost=result.loc["central water tank storage", "fixed"],
       e_cyclic=True,
       e_nom_extendable=True,
-      standing_loss=0.2/24)  # für die standing_loss recherche betreiben. was angenommen werden kann -> Formel suchen in der Literatur Recheche
+      standing_loss=0.2 / 24)  # für die standing_loss recherche betreiben. was angenommen werden kann -> Formel suchen in der Literatur Recheche
 
 n.add("Bus", "battery_storage")
 
@@ -177,7 +234,7 @@ n.add(
     efficiency=result.loc["battery inverter", "efficiency"] ** 0.5,
     capital_cost=result.loc["battery inverter", "fixed"],
     p_nom_extendable=True
-    )
+)
 
 # add battery storage battery inverter
 n.add("Store",
@@ -197,7 +254,7 @@ n.add(
     carrier="battery discharger",
     efficiency=result.loc["battery inverter", "efficiency"] ** 0.5,
     p_nom_extendable=True
-    )
+)
 
 # add H2 storage
 n.add("Bus", "H2")
@@ -234,26 +291,8 @@ Die Annahme stimmt soweit bus0 beschreibt mein input und jeglicher weiterer Bus 
 Die efficiency wird in das Verhältnis gesetzt zum bus0 
 """""
 eh_electrolysis_hp = all_technologies_dfs["central excess-heat heat pump"]
-cop_eh_hp = pd.DataFrame(index=pd.date_range(start="2019-01-01", end="2019-12-31 23:00", freq="h"))
-for name, row in eh_electrolysis_hp.iterrows():
-    parts = row['cop_series'].split('_')
-    if len(parts) >= 2:
-        source_type = parts[0]
-        fluid = '_'.join(parts[1:])  # Handling fluid names with '_'
-
-        if source_type in cop_series and fluid in cop_series[source_type]:
-            series_list = cop_series[source_type][fluid]['COP']
-            if series_list and series_list[0].index.equals(cop_eh_hp.index):
-                cop_eh_hp[name] = series_list[0]
-
-for name, row in eh_electrolysis_hp.iterrows():
-    if name in cop_eh_hp.columns:
-        # Extract non-zero COP values and calculate the minimum COP
-        min_cop = cop_eh_hp[cop_eh_hp[name] > 0][name].min()
-
-        # Calculate and update the Start and End capacities in MW_el
-        eh_electrolysis_hp.at[name, 'Start Capacity MW_el'] = row['Start Capacity'] / min_cop
-        eh_electrolysis_hp.at[name, 'End Capacity MW_el'] = row['End Capacity'] / min_cop
+cop_eh_hp = calculate_cop(eh_electrolysis_hp, cop_series)
+update_capacity(eh_electrolysis_hp, cop_eh_hp)
 
 n.madd('Link',
        eh_electrolysis_hp.index,
@@ -267,26 +306,8 @@ n.madd('Link',
        )
 
 river_hp = all_technologies_dfs["central sourced-water heat pump"]
-cop_river_hp = pd.DataFrame(index=pd.date_range(start="2019-01-01", end="2019-12-31 23:00", freq="h"))
-for name, row in river_hp.iterrows():
-    parts = row['cop_series'].split('_')
-    if len(parts) >= 2:
-        source_type = parts[0]
-        fluid = '_'.join(parts[1:])  # Handling fluid names with '_'
-
-        if source_type in cop_series and fluid in cop_series[source_type]:
-            series_list = cop_series[source_type][fluid]['COP']
-            if series_list and series_list[0].index.equals(cop_river_hp.index):
-                cop_river_hp[name] = series_list[0]
-
-for name, row in river_hp.iterrows():
-    if name in cop_river_hp.columns:
-        # Extract non-zero COP values and calculate the minimum COP
-        min_cop = cop_river_hp[cop_river_hp[name] > 0][name].min()
-
-        # Calculate and update the Start and End capacities in MW_el
-        river_hp.at[name, 'Start Capacity MW_el'] = row['Start Capacity'] / min_cop
-        river_hp.at[name, 'End Capacity MW_el'] = row['End Capacity'] / min_cop
+cop_river_hp = calculate_cop(river_hp, cop_series)
+update_capacity(river_hp, cop_river_hp)
 
 n.add('Bus',
       'river_withdrawal'
@@ -295,13 +316,13 @@ n.add('Bus',
 n.add('Generator',
       'river_potential',
       bus='river_withdrawal',
-      p_nom_max=50, # ersetzen mit dem Wert, der noch berechnet werden muss
-      p_nom_extandable=True
+      p_nom_max=flussthermie_value,
+      p_nom_extendable=True
       )
 
 n.madd('Link',
        river_hp.index,
-       bus0=['river_potential'],
+       bus0=['river_withdrawal'],
        bus1=['heat'],
        bus2=['power'],
        capital_cost=river_hp["fixed"],
@@ -310,6 +331,32 @@ n.madd('Link',
        p_nom_extendable=True
        )
 
+if "central sourced-sea heat pump" in all_technologies_dfs:
+    lake_hp = all_technologies_dfs["central sourced-sea heat pump"]
+    cop_lake_hp = calculate_cop(lake_hp, cop_series)
+    update_capacity(lake_hp, cop_lake_hp)
+
+    n.add('Bus',
+          'lake_withdrawal'
+          )
+
+    n.add('Generator',
+          'lake_potential',
+          bus='lake_withdrawal',
+          p_nom_max=seethermie_value,
+          p_nom_extendable=True
+          )
+
+    n.madd('Link',
+           river_hp.index,
+           bus0=['river_withdrawal'],
+           bus1=['heat'],
+           bus2=['power'],
+           capital_cost=river_hp["fixed"],
+           efficiency=(1 / (cop_lake_hp - 1)) * cop_lake_hp,
+           efficiency2=-1 / (cop_lake_hp - 1),
+           p_nom_extendable=True
+           )
 
 n.add("Store",
       "H2 Speicher",
@@ -331,30 +378,8 @@ n.madd("Link",
        )
 
 central_air_hp = all_technologies_dfs["central air sourced heat pump"]
-
-cop_air_hp = pd.DataFrame(index=pd.date_range(start="2019-01-01", end="2019-12-31 23:00", freq="h"))
-for name, row in central_air_hp.iterrows():
-    parts = row['cop_series'].split('_')
-    if len(parts) >= 2:
-        source_type = parts[0]
-        fluid = '_'.join(parts[1:])  # Handling fluid names with '_'
-
-        if source_type in cop_series and fluid in cop_series[source_type]:
-            series_list = cop_series[source_type][fluid]['COP']
-            if series_list and series_list[0].index.equals(cop_air_hp.index):
-                cop_air_hp[name] = series_list[0]
-
-for name, row in central_air_hp.iterrows():
-    # Assuming the name of the heat pump directly matches the column in cop_air_hp DataFrame
-    if name in cop_air_hp.columns:
-        # Extract non-zero COP values and calculate the minimum COP
-        min_cop = cop_air_hp[cop_air_hp[name] > 0][name].min()
-
-        # Calculate and update the Start and End capacities in MW_el
-        central_air_hp.at[name, 'Start Capacity MW_el'] = row['Start Capacity'] / min_cop
-        central_air_hp.at[name, 'End Capacity MW_el'] = row['End Capacity'] / min_cop
-
-
+cop_air_hp = calculate_cop(central_air_hp, cop_series)
+update_capacity(central_air_hp, cop_air_hp)
 
 n.madd("Link",
        central_air_hp.index,
@@ -377,152 +402,45 @@ n.madd("Link",
        p_nom_extendable=True)
 
 
-def custom_constraints(network, snapshots):
+def create_all_components_df(all_technologies_dfs):
+    # Use a list comprehension to gather all DataFrames from the dictionary
+    df_list = [df for df in all_technologies_dfs.values()]
 
-    air_heat_pump_constraints(network, snapshots)
-    eh_heat_pump_constraints(network, snapshots)
-    electric_boiler_constraints(network, snapshots)
-    H2_boiler_constraints(network, snapshots)
-    electrolysis_AEC_constraints(network, snapshots)
+    # Concatenate all the DataFrames in the list into one DataFrame
+    all_components_df = pd.concat(df_list)
+
+    return all_components_df
 
 
-def air_heat_pump_constraints(n, sns):
+# Now, call the function with your dictionary
+all_components_df = create_all_components_df(all_technologies_dfs)
+
+
+def custom_constraints(n, sns):
     if not n.links.p_nom_extendable.any():
         return
 
-    n.model.add_variables(coords=[central_air_hp.index], name="Link-build", binary=True)
+    n.model.add_variables(coords=[all_components_df.index], name="Link-build", binary=True)
     # Retrieve the binary variable
     binary_var = n.model["Link-build"]
     print(binary_var)
 
     # Get the variable p_nom_opt for the heat pumps
-    p_nom_opt = n.model["Link-p_nom"].loc[central_air_hp.index]
+    p_nom_opt = n.model["Link-p_nom"].loc[all_components_df.index]
     print(p_nom_opt)
 
-    # Read p_nom_min from your processed data
-    p_nom_min = central_air_hp["Start Capacity MW_el"].loc[central_air_hp.index]
+    p_nom_min = all_components_df["Start Capacity"].loc[all_components_df.index]
     print(p_nom_min)
 
-    m = 8
+    m = all_components_df["M"].loc[all_components_df.index]
+    print(m)
 
-    for hp in central_air_hp.index:
-        n.model.add_constraints(p_nom_opt[hp] - binary_var[hp] * m <= 0,
-                                name=f"Link-p_nom-upperlimit-{hp}")
-
-        # Constraint 2: If binary_var is 0, p_nom_opt_pump must be 0
-        n.model.add_constraints(p_nom_opt[hp] - binary_var[hp] * m >= p_nom_min[hp] - m,
-                                name=f"Link-p_nom-lowerlimit-{hp}")
-
-def eh_heat_pump_constraints(n, sns):
-    if not n.links.p_nom_extendable.any():
-        return
-
-    n.model.add_variables(coords=[eh_electrolysis_hp.index], name="Link-build1", binary=True)
-    # Retrieve the binary variable
-    binary_var1 = n.model["Link-build1"]
-    print(binary_var1)
-
-    # Get the variable p_nom_opt for the heat pumps
-    p_nom_opt = n.model["Link-p_nom"].loc[eh_electrolysis_hp.index]
-    print(p_nom_opt)
-
-    # Read p_nom_min from your processed data
-    p_nom_min = eh_electrolysis_hp["Start Capacity MW_el"].loc[eh_electrolysis_hp.index]
-    print(p_nom_min)
-
-    m = 30
-
-    for eh in eh_electrolysis_hp.index:
-        n.model.add_constraints(p_nom_opt[eh] - binary_var1[eh] * m <= 0,
-                                name=f"Link-p_nom-upperlimit-{eh}")
-
-        # Constraint 2: If binary_var is 0, p_nom_opt_pump must be 0
-        n.model.add_constraints(p_nom_opt[eh] - binary_var1[eh] * m >= p_nom_min[eh] - m,
-                                name=f"Link-p_nom-lowerlimit-{eh}")
-
-
-def electric_boiler_constraints(n, sns):
-    if not n.links.p_nom_extendable.any():
-        return
-
-    n.model.add_variables(coords=[central_electric_boiler.index], name="Link-build2", binary=True)
-    # Retrieve the binary variable
-    binary_var2 = n.model["Link-build2"]
-    print(binary_var2)
-
-    # Get the variable p_nom_opt for the heat pumps
-    p_nom_opt = n.model["Link-p_nom"].loc[central_electric_boiler.index]
-    print(p_nom_opt)
-
-    # Read p_nom_min from your processed data
-    p_nom_min = central_electric_boiler["Start Capacity"].loc[central_electric_boiler.index]
-    print(p_nom_min)
-
-    m = 30
-
-    for eb in central_electric_boiler.index:
-        n.model.add_constraints(p_nom_opt[eb] - binary_var2[eb] * m <= 0,
-                                name=f"Link-p_nom-upperlimit-{eb}")
-
-        # Constraint 2: If binary_var is 0, p_nom_opt_pump must be 0
-        n.model.add_constraints(p_nom_opt[eb] - binary_var2[eb] * m >= p_nom_min[eb] - m,
-                                name=f"Link-p_nom-lowerlimit-{eb}")
-
-
-def H2_boiler_constraints(n, sns):
-    if not n.links.p_nom_extendable.any():
-        return
-
-    n.model.add_variables(coords=[central_H2_boiler.index], name="Link-build3", binary=True)
-    # Retrieve the binary variable
-    binary_var3 = n.model["Link-build3"]
-    print(binary_var3)
-
-    # Get the variable p_nom_opt for the heat pumps
-    p_nom_opt = n.model["Link-p_nom"].loc[central_H2_boiler.index]
-    print(p_nom_opt)
-
-    # Read p_nom_min from your processed data
-    p_nom_min = central_H2_boiler["Start Capacity"].loc[central_H2_boiler.index]
-    print(p_nom_min)
-
-    m = 30
-
-    for H2 in central_H2_boiler.index:
-        n.model.add_constraints(p_nom_opt[H2] - binary_var3[H2] * m <= 0,
-                                name=f"Link-p_nom-upperlimit-{H2}")
-
-        # Constraint 2: If binary_var is 0, p_nom_opt_pump must be 0
-        n.model.add_constraints(p_nom_opt[H2] - binary_var3[H2] * m >= p_nom_min[H2] - m,
-                                name=f"Link-p_nom-lowerlimit-{H2}")
-
-
-def electrolysis_AEC_constraints(n, sns):
-    if not n.links.p_nom_extendable.any():
-        return
-
-    n.model.add_variables(coords=[electrolysis_AEC.index], name="Link-build4", binary=True)
-    # Retrieve the binary variable
-    binary_var4 = n.model["Link-build4"]
-    print(binary_var4)
-
-    # Get the variable p_nom_opt for the heat pumps
-    p_nom_opt = n.model["Link-p_nom"].loc[electrolysis_AEC.index]
-    print(p_nom_opt)
-
-    # Read p_nom_min from your processed data
-    p_nom_min = electrolysis_AEC["Start Capacity"].loc[electrolysis_AEC.index]
-    print(p_nom_min)
-
-    m = 1500
-
-    for AEC in electrolysis_AEC.index:
-        n.model.add_constraints(p_nom_opt[AEC] - binary_var4[AEC] * m <= 0,
-                                name=f"Link-p_nom-upperlimit-{AEC}")
-
-        # Constraint 2: If binary_var is 0, p_nom_opt_pump must be 0
-        n.model.add_constraints(p_nom_opt[AEC] - binary_var4[AEC] * m >= p_nom_min[AEC] - m,
-                                name=f"Link-p_nom-lowerlimit-{AEC}")
+    for comp in all_components_df.index:
+        # Apply the constraints
+        n.model.add_constraints(p_nom_opt[comp] - binary_var[comp] * m[comp] <= 0,
+                                name=f"Link-p_nom-upperlimit-{comp}")
+        n.model.add_constraints(p_nom_opt[comp] - binary_var[comp] * m[comp] >= p_nom_min[comp] - m[comp],
+                                name=f"Link-p_nom-lowerlimit-{comp}")
 
 
 # add demand
@@ -542,18 +460,6 @@ c = 'link'  # Replace with the actual component name
 
 if 'build_opt' not in n.links.columns:
     n.links['build_opt'] = 0  # Initialize with a default value (e.g., 0)
-
-if 'build1_opt' not in n.links.columns:
-    n.links['build1_opt'] = 0
-
-if 'build2_opt' not in n.links.columns:
-    n.links['build2_opt'] = 0
-
-if 'build3_opt' not in n.links.columns:
-    n.links['build3_opt'] = 0
-
-if 'build4_opt' not in n.links.columns:
-    n.links['build4_opt'] = 0
 
 marginal_price_bus = n.buses_t.marginal_price
 

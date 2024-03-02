@@ -8,13 +8,15 @@ import os
 
 
 # Function to fetch data from the WFS service and load into a GeoDataFrame
-def fetch_layer_and_save(wfs, layer_name, filepath):
+def fetch_layer_and_save(wfs, layer_name, filepath, target_crs=None):
     if not os.path.exists(filepath):  # Check if file already exists to avoid re-downloading
         response = wfs.getfeature(typename=layer_name, outputFormat='json')
-        data = io.BytesIO(response.read())
-        gdf = gpd.read_file(data)
-        gdf = gdf.to_crs('EPSG:3035')  # Reproject before saving
-        gdf.to_file(filepath, driver='GeoJSON')
+        data = gpd.read_file(io.BytesIO(response.read()))  # Directly load into GeoDataFrame
+
+        if target_crs and data.crs != target_crs:  # Reproject only if necessary
+            data = data.to_crs(target_crs)
+
+        data.to_file(filepath, driver='GeoJSON')
 
 url = 'https://energieportal-brandenburg.de/geoserver/bepo/ows'
 wfs = WebFeatureService(url=url, version='2.0.0')
@@ -42,16 +44,22 @@ for key, filepath in layer_info.items():
     fetch_layer_and_save(wfs, key, filepath)
 
 
-def load_layer_from_geojson_and_reproject(filepath, target_crs):
+def load_layer_from_geojson(filepath, filter_waermepot=False):
     gdf = gpd.read_file(filepath)
-    # Reproject to the target CRS
-    return gdf.to_crs(target_crs)
+    # Optionally filter the GeoDataFrame based on 'WaermePot' if specified
+    if filter_waermepot:
+        gdf = gdf[gdf['WaermePot'] > 0]
+        _ = gdf.sindex
+    return gdf
 
 
-target_crs = 'EPSG:3035'
-
-# Load layers from GeoJSON files into a dictionary and reproject
-layer_data = {key: load_layer_from_geojson_and_reproject(filepath, target_crs) for key, filepath in layer_info.items()}
+# Adjust the dictionary comprehension to include conditional filtering
+layer_data = {
+    key: load_layer_from_geojson(
+        filepath,
+        filter_waermepot=('Gemarkungen' in key)  # Apply filtering based on layer key
+    ) for key, filepath in layer_info.items()
+}
 
 
 def find_close_potentials(potential_gdf, system_geom, distance):
@@ -61,7 +69,7 @@ def find_close_potentials(potential_gdf, system_geom, distance):
 
 
 # Snakemake parameters for selected system and max distance
-selected_system_id = 'Brandenburg_Fernwaerme.3'  # snakemake.config['selected_system_id']
+selected_system_id = 'Brandenburg_Fernwaerme.21'  # snakemake.config['selected_system_id']
 max_distance = 1000    # snakemake.config['max_distance']
 
 # Select the specific district heating system
@@ -71,8 +79,6 @@ selected_system_geom = selected_system.geometry.iloc[0]
 
 # Define potential layers to analyze for proximity
 potential_layer_keys = [
-    #'bepo:Gemarkungen_Abwasser',
-    #'bepo:Gemarkungen_Abwaerme_Industrie',
     'bepo:Gemarkungen_Flussthermie',
     'bepo:Gemarkungen_Seethermie'
 ]
@@ -90,7 +96,9 @@ for layer_key in potential_layer_keys:
 # Concatenate all dataframes in the list into a single GeoDataFrame
 all_close_potentials = pd.concat(all_close_potentials_list, ignore_index=True)
 
-all_close_potentials = all_close_potentials[all_close_potentials['WaermePot'] > 0]
+max_potentials_indices = all_close_potentials.groupby('type')['WaermePot'].idxmax()
+max_potentials = all_close_potentials.loc[max_potentials_indices]
+
 
 # Save the output to a file
 #all_close_potentials.to_file(snakemake.output.gpkg, driver="GPKG")

@@ -2,29 +2,21 @@ import atlite
 import logging
 
 import matplotlib.pyplot as plt
-import xarray as xr
 import matplotlib.animation as animation
-
-import pandas as pd
 
 # for getting information on what is going on
 logging.basicConfig(level=logging.INFO)
-# for debugging better use this one -> more information
-# logging.basicConfig(level=logging.DEBUG)
+
 
 cutout = atlite.Cutout(
-    path="Germany-2019.nc",
+    path="germany_2014_2023.nc",
     module="era5",
     x=slice(4.8479, 15.8638),
     y=slice(55.2353, 46.9644),
-    time=slice("2019-01", "2019-12"),
+    time=slice("2014-01", "2023-12"),
 )
 
-module = "era5"
-slice("2019-01", "2019-12")
-x = slice(4.8479, 15.8638) # Longitude
-y = slice(55.2353, 46.9644) # Latitude
-cutout.prepare()
+cutout.prepare(features=["wind", "temperature"])
 
 # get data
 temp = cutout.data.temperature
@@ -54,10 +46,3 @@ temperature_series.to_csv('data/temperature_series.csv', index=True)
 # Zeige die erstellte Serie an
 print(temperature_series)
 
-# change temperature_series from K to °C
-
-
-wind = cutout.data.wnd_azimuth
-wind_at_point = wind.sel(x=x_point, y=y_point, method='nearest')
-wind_series = wind_at_point.to_series()
-print(wind_series)

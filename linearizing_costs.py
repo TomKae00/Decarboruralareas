@@ -3,27 +3,42 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from cost_functions import power_law_models_df
 from cost_functions import cop_series
-from cost_functions import temperature_series_map
+from cost_functions import combined_data
+from cost_functions import erzeugerpreisindex
 
-heat_pumps_params = {
-    "lower_limit": 50,
-    "upper_limit": 15000,
-    "error_threshold": 20  # Default for demonstration, adjust as necessary
-}
+import yaml
 
-component_parameters = {
-    "central electric boiler": {"lower_limit": 150, "upper_limit": 20000, "error_threshold": 5},
-    "electrolysis AEC": {"lower_limit": 1000, "upper_limit": 1e6, "error_threshold": 20},
-    "electrolysis PEMEC": {"lower_limit": 1000, "upper_limit": 1e6, "error_threshold": 20},
-    "central gas boiler": {"lower_limit": 10, "upper_limit": 20000, "error_threshold": 20},
-    "central H2 boiler": {"lower_limit": 10, "upper_limit": 20000, "error_threshold": 20},
-    # Add other components with lower_limit as needed
-}
+# Load the YAML configuration file
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
 
-for source in temperature_series_map.keys():
-    for fluid in ["R290", "R1234yf", "R134a", "R600a", "R600", "R245fa", "R717"]:
-        combined_key = f"{source}_{fluid}"
-        component_parameters[combined_key] = heat_pumps_params.copy()
+dT = 55
+cp = 1.1625
+rho = 1000
+target_year = '2025'
+
+zuwachs_water_tank = erzeugerpreisindex.loc['Andere Behaelter f. fluessige Stoffe,aus Eisen,Stahl', target_year] / 100
+
+component_parameters_config = config['component_parameters']
+
+# Extract component parameters from config and filter for specific storage types
+storage_type = ['PTES', 'central water tank storage']  # List the storage types you're interested in
+# Initialize component_parameters with entries for specific storage types only
+component_parameters = {k: v for k, v in component_parameters_config.items() if k in storage_type}
+
+
+# Iterate through each row in combined_data to apply parameters
+for index, row in combined_data.iterrows():
+    technology = row['Technology']
+    fluid = row['fluid']
+
+    # Use technology as the key for technologies without a specific fluid
+    key = technology if fluid == 'NA' else f"{technology}_{fluid}"
+
+    # Apply technology-specific parameters from the config, default to empty dict if not specified
+    params = component_parameters_config.get(technology, {})
+
+    component_parameters[key] = params
 
 
 def generate_cost_function(alpha, beta):
@@ -44,11 +59,41 @@ def generate_cost_function(alpha, beta):
     return cost_function
 
 
+def cost_per_kWh_PTES(x, dT, cp, rho):
+    # Calculate cost only where x > 0, otherwise return 0
+    return np.where(x > 0, (((0.9 + 2.44 * 10**(-5) * x) * 10**6) / (x * dT * cp * rho)) * 10**6, 0)
+
+
+def cost_per_kWh_central_water_tank_storage(x, dT, cp, rho):
+    # Calculate cost only where x > 0, otherwise return 0
+    return np.where(x > 0, ((7450 * x ** (-0.47)) * zuwachs_water_tank * x) / (x * dT * cp * rho) * 10 ** 6, 0)
+
+
+cost_calculation_map = {
+    'PTES': cost_per_kWh_PTES,
+    'central water tank storage': cost_per_kWh_central_water_tank_storage,
+}
+
+
+def make_storage_cost_function(dT, cp, rho, storage_type):
+    def storage_cost_function(x):
+        if storage_type in cost_calculation_map:
+            # Retrieve the specific cost function from the map based on storage_type
+            specific_cost_function = cost_calculation_map[storage_type]
+            return specific_cost_function(x, dT, cp, rho)
+    return storage_cost_function
+
+
 cost_functions = {}
+
+for storage_type in cost_calculation_map.keys():
+    cost_functions[storage_type] = make_storage_cost_function(dT, cp, rho, storage_type)
+
 for component, row in power_law_models_df.iterrows():  # component is obtained from the index directly
     alpha = row['alpha']
     beta = row['beta']
-    cost_functions[component] = generate_cost_function(alpha, beta)
+    if component not in cost_functions:  # Check to avoid overwriting PTES/hot water tank
+        cost_functions[component] = generate_cost_function(alpha, beta)
 
 
 def constant_cost_approx_with_dynamic_segments(cost_function, lower_limit, upper_limit, error_threshold):
@@ -129,48 +174,52 @@ def apply_piecewise_approx_to_individual_dfs(cost_functions, component_parameter
 # Generate the DataFrames
 component_dfs = apply_piecewise_approx_to_individual_dfs(cost_functions, component_parameters)
 
-for component_name, df in component_dfs.items():
-    parts = component_name.split("_")
-    fluid = "_".join(parts[1:]) if len(parts) > 1 else None
-    source = parts[0] if parts else None
-
-
-    # Check for a matching COP series in a nested dictionary structure
-    if source in cop_series and fluid in cop_series[source]:
-        df['cop_series'] = f"{source}_{fluid}"  # Use a combined key for clarity
-
-# Aggregate DataFrames based on source technology and rename
-source_to_technology_name = {
-    "Luft": "central air sourced heat pump",
-    "Flussthermie": "central sourced-water heat pump",
-    "Seethermie": "central sourced-sea heat pump",
-    "Abwaerme": "central excess-heat heat pump"
-}
-
 all_technologies_dfs = {}
 
+storage_type = ['PTES', 'central water tank storage'] # stated once again for some reason PTES is missing without this
+
 for component_name, df in component_dfs.items():
-
-    df['Start Capacity'] = df['Start Capacity'] / 1000  # Convert kW to MW
-    df['End Capacity'] = df['End Capacity'] / 1000  # Convert kW to MW
-    df['Constant Cost'] = df['Constant Cost'] * 1000  # Convert €/kW to €/MW
-
-    source = component_name.split("_")[0]
-
-    if source in source_to_technology_name:
-        technology_name = source_to_technology_name[source]
-        df['Technology'] = technology_name  # Add 'Technology' column before aggregation
-        df['fluid'] = "_".join(component_name.split("_")[1:])  # Ensure 'fluid' column is added
-        if technology_name not in all_technologies_dfs:
-            all_technologies_dfs[technology_name] = [df]
-        else:
-            all_technologies_dfs[technology_name].append(df)
+    print(component_name)
+    if component_name in storage_type:
+        print(storage_type)
+        print(component_name)
+        df['Start Capacity'] = df['Start Capacity'] * rho * dT * cp * 1e-6  # Convert to MWh
+        df['End Capacity'] = df['End Capacity'] * rho * dT * cp * 1e-6
     else:
-        df['Technology'] = component_name  # Use the component name directly for non-source technologies
-        all_technologies_dfs[component_name] = [df]
+        df['Start Capacity'] = df['Start Capacity'] / 1000  # Convert kW to MW
+        df['End Capacity'] = df['End Capacity'] / 1000
+        df['Constant Cost'] = df['Constant Cost'] * 1000        # Convert kW to MW
 
-# Combine the DataFrames for each technology and set 'Technology' as index
+    # Split component_name to identify if it has a specific fluid associated (for heat pumps)
+    parts = component_name.split("_")
+    technology = parts[0] if parts else None
+    fluid = "_".join(parts[1:]) if len(parts) > 1 else None
+
+    if technology in cop_series and fluid in cop_series[technology]:
+        df['cop_series'] = f"{technology}_{fluid}"
+    else:
+        df['cop_series'] = 'NA'  # Use 'NA' for technologies without specific fluids
+
+    # Prepare the DataFrame entry
+    df['Technology'] = technology  # Add 'Technology' column for consistency
+
+    if technology in all_technologies_dfs:
+        all_technologies_dfs[technology].append(df)
+    else:
+        all_technologies_dfs[technology] = [df]
+
+technologies_to_remove = []
+
 for technology_name, dfs in all_technologies_dfs.items():
-    combined_df = pd.concat(dfs, ignore_index=True)
-    combined_df.set_index('Technology', inplace=True)
-    all_technologies_dfs[technology_name] = combined_df
+    if config['components_enabled'].get(technology_name, False):
+        combined_df = pd.concat(dfs, ignore_index=True)
+        max_end_capacity = combined_df['End Capacity'].max()
+        combined_df['M'] = max_end_capacity
+        combined_df.set_index('Technology', inplace=True)
+        all_technologies_dfs[technology_name] = combined_df
+    else:
+        technologies_to_remove.append(technology_name)
+
+# Now, remove the technologies that are not enabled
+for technology_name in technologies_to_remove:
+    all_technologies_dfs.pop(technology_name, None)

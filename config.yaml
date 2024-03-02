@@ -6,3 +6,71 @@ params:
   r: 0.02
   nyears: 1
   year: 2020
+
+components_enabled:
+  central excess-heat heat pump: true
+  central sourced-water heat pump: true
+  central air sourced heat pump: true
+  central H2 boiler: true
+  central electric boiler: true
+  central gas boiler: false
+  electrolysis AEC: true
+  electrolysis PEMEC: true
+  central water tank storage: true
+  PTES: true
+
+
+min_temp_thresholds:
+  Luft: 0
+  Flussthermie: 0
+  Seethermie: 0
+  Abwaerme: 0
+
+temperature_adjustments:
+  Abwaerme: 50
+
+component_parameters:
+  "central electric boiler":
+    lower_limit: 150
+    upper_limit: 20000
+    error_threshold: 80
+  "electrolysis AEC":
+    lower_limit: 1000
+    upper_limit: 1000000
+    error_threshold: 80
+  "electrolysis PEMEC":
+    lower_limit: 1000
+    upper_limit: 1000000
+    error_threshold: 80
+  "central gas boiler":
+    lower_limit: 10
+    upper_limit: 20000
+    error_threshold: 80
+  "central H2 boiler":
+    lower_limit: 10
+    upper_limit: 20000
+    error_threshold: 80
+  "central excess-heat heat pump":
+    lower_limit: 10
+    upper_limit: 15000
+    error_threshold: 80
+  "central sourced-water heat pump":
+    lower_limit: 10
+    upper_limit: 15000
+    error_threshold: 80
+  "central air sourced heat pump":
+    lower_limit: 10
+    upper_limit: 15000
+    error_threshold: 80
+  "central sourced-sea heat pump":
+    lower_limit: 10
+    upper_limit: 15000
+    error_threshold: 80
+  "PTES":
+    lower_limit: 5000
+    upper_limit: 200000
+    error_threshold: 70
+  "central water tank storage":
+    lower_limit: 500
+    upper_limit: 50000
+    error_threshold: 70
