@@ -2,9 +2,21 @@ from owslib.wfs import WebFeatureService
 import geopandas as gpd
 import pandas as pd
 import io
-import snakemake
 import matplotlib.pyplot as plt
 import os
+import yaml
+
+with open('/Users/tomkaehler/Documents/Uni/BA/config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
+
+"""
+params for snakemake
+"""
+# Snakemake parameter for selected system and max distance
+selected_system_id = config['scenario']['selected_system_id']
+
+# Access the max_distance value out of config file
+max_distance = config['data_energieportal']['max_distance']
 
 
 # Function to fetch data from the WFS service and load into a GeoDataFrame
@@ -22,9 +34,9 @@ url = 'https://energieportal-brandenburg.de/geoserver/bepo/ows'
 wfs = WebFeatureService(url=url, version='2.0.0')
 
 layer_info = {
-    'bepo:Brandenburg_Fernwaerme': 'data/energieportal/brandenburg_fernwaerme.json',
-    'bepo:Gemarkungen_Flussthermie': 'data/energieportal/gemarkungen_flussthermie.json',
-    'bepo:Gemarkungen_Seethermie': 'data/energieportal/gemarkungen_seethermie.json',
+    'bepo:Brandenburg_Fernwaerme': '/Users/tomkaehler/Documents/Uni/BA/data/energieportal/brandenburg_fernwaerme.json',
+    'bepo:Gemarkungen_Flussthermie': '/Users/tomkaehler/Documents/Uni/BA/data/energieportal/gemarkungen_flussthermie.json',
+    'bepo:Gemarkungen_Seethermie': '/Users/tomkaehler/Documents/Uni/BA/data/energieportal/gemarkungen_seethermie.json',
 }
 
 # Layers to be used
@@ -41,7 +53,7 @@ layer_info = {
 #]
 
 for key, filepath in layer_info.items():
-    fetch_layer_and_save(wfs, key, filepath)
+    fetch_layer_and_save(wfs, key, filepath, 'EPSG:4326')
 
 
 def load_layer_from_geojson(filepath, filter_waermepot=False):
@@ -63,19 +75,24 @@ layer_data = {
 
 
 def find_close_potentials(potential_gdf, system_geom, distance):
-    search_area = system_geom.buffer(distance)
-    close_potentials = potential_gdf[potential_gdf.intersects(search_area)]
+    # Convert the GeoDataFrames to EPSG:3035 for distance calculations
+    potential_gdf_3035 = potential_gdf.to_crs("EPSG:3035")
+    system_geom_3035 = system_geom.to_crs("EPSG:3035").geometry.iloc[0]
+    # Perform the buffer operation in EPSG:3035
+    search_area = system_geom_3035.buffer(distance)
+    close_potentials = potential_gdf_3035[potential_gdf_3035.intersects(search_area)]
+    # Optionally, convert back to EPSG:4326 if needed for plotting or further usage
+    close_potentials = close_potentials.to_crs("EPSG:4326")
     return close_potentials
 
-
-# Snakemake parameters for selected system and max distance
-selected_system_id = 'Brandenburg_Fernwaerme.21'  # snakemake.config['selected_system_id']
-max_distance = 1000    # snakemake.config['max_distance']
 
 # Select the specific district heating system
 fernwaerme_df = layer_data['bepo:Brandenburg_Fernwaerme']
 selected_system = fernwaerme_df[fernwaerme_df['id'] == selected_system_id]
-selected_system_geom = selected_system.geometry.iloc[0]
+selected_system.to_file(f"/Users/tomkaehler/Documents/Uni/BA/output/selected_system_{selected_system_id}.gpkg", driver="GPKG")
+#selected_system.to_file(snakemake.output.selected_system)
+
+print(fernwaerme_df['geometry'].head())
 
 # Define potential layers to analyze for proximity
 potential_layer_keys = [
@@ -88,23 +105,24 @@ all_close_potentials_list = []
 
 for layer_key in potential_layer_keys:
     potential_type = layer_key.split(':')[1]  # Extract the type from the layer key
-    close_potentials = find_close_potentials(layer_data[layer_key], selected_system_geom, max_distance)
+    close_potentials = find_close_potentials(layer_data[layer_key], selected_system, max_distance)
     close_potentials = close_potentials.copy()  # To avoid SettingWithCopyWarning
     close_potentials['type'] = potential_type  # Add a column to label the potential type
     all_close_potentials_list.append(close_potentials)
 
 # Concatenate all dataframes in the list into a single GeoDataFrame
 all_close_potentials = pd.concat(all_close_potentials_list, ignore_index=True)
+all_close_potentials.to_file(f"/Users/tomkaehler/Documents/Uni/BA/output/all_close_potentials_{selected_system_id}.gpkg", driver="GPKG")
+#all_close_potentials.to_file(snakemake.output.all_close_potentials)
 
 max_potentials_indices = all_close_potentials.groupby('type')['WaermePot'].idxmax()
 max_potentials = all_close_potentials.loc[max_potentials_indices]
+max_potentials.to_file(f"/Users/tomkaehler/Documents/Uni/BA/output/max_potentials_{selected_system_id}.gpkg", driver="GPKG")
+#max_potentials.to_file(snakemake.output.max_potentials)
 
-
-# Save the output to a file
-#all_close_potentials.to_file(snakemake.output.gpkg, driver="GPKG")
 
 # Assuming selected_system and all_close_potentials are already defined as per your script
-
+""""
 # Plotting the district heating system
 ax = selected_system.plot(color='red', figsize=(10, 10), label='District Heating System')
 
@@ -119,3 +137,4 @@ plt.legend()
 
 # Showing the plot
 plt.show()
+"""

@@ -1,10 +1,12 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from cost_functions import power_law_models_df
-from cost_functions import cop_series
-from cost_functions import combined_data
-from cost_functions import erzeugerpreisindex
+import pickle
+from scripts.cost_functions import save_data_to_file
+from scripts.cost_functions import load_data
+
+from scripts.cost_functions import combined_data
+
 
 import yaml
 
@@ -12,14 +14,37 @@ import yaml
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
-dT = 55
-cp = 1.1625
-rho = 1000
-target_year = '2025'
 
-zuwachs_water_tank = erzeugerpreisindex.loc['Andere Behaelter f. fluessige Stoffe,aus Eisen,Stahl', target_year] / 100
+def load_data_from_file(filename):
+    with open(filename, 'rb') as f:
+        return pickle.load(f)
 
+
+# Define variable params for config and snakemake
+selected_system_id = config['scenario']['selected_system_id']
+#selected_system_id = snakemake.params.system_id
+year_of_interest = config['scenario']['year_of_interest']
+#year_of_interest = snakemake.params.year_of_interest
+supply_temp = config['scenario']['supply_temp'] + 273.15
+#supply_temp = snakemake.params.supply_temp
+return_temp = config['scenario']['return_temp'] + 273.15
+#supply_temp = snakemake.params.return_temp
+costs_data_year = config['scenario']['costs_data_year']
+#costs_data_year = snakemake.params.costs_data_year
+
+# fixed variables
+project_year = config['cost_functions']['project_year']
+cp = config['cost_functions']['cp']
+rho = config['cost_functions']['rho']
+dT = supply_temp - return_temp
 component_parameters_config = config['component_parameters']
+
+
+power_law_models_df = load_data(f'output/power_law_models_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.csv')
+erzeugerpreisindex = load_data(f'output/erzeugerpreisindex_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.csv')
+
+
+zuwachs_water_tank = erzeugerpreisindex.loc['Andere Behaelter f. fluessige Stoffe,aus Eisen,Stahl', project_year] / 100
 
 # Extract component parameters from config and filter for specific storage types
 storage_type = ['PTES', 'central water tank storage']  # List the storage types you're interested in
@@ -176,13 +201,13 @@ component_dfs = apply_piecewise_approx_to_individual_dfs(cost_functions, compone
 
 all_technologies_dfs = {}
 
-storage_type = ['PTES', 'central water tank storage'] # stated once again for some reason PTES is missing without this
+cop_series = load_data_from_file(f'output/cop_series_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.pkl')
+
+storage_type = ['PTES', 'central water tank storage']
 
 for component_name, df in component_dfs.items():
-    print(component_name)
+
     if component_name in storage_type:
-        print(storage_type)
-        print(component_name)
         df['Start Capacity'] = df['Start Capacity'] * rho * dT * cp * 1e-6  # Convert to MWh
         df['End Capacity'] = df['End Capacity'] * rho * dT * cp * 1e-6
     else:
@@ -223,3 +248,5 @@ for technology_name, dfs in all_technologies_dfs.items():
 # Now, remove the technologies that are not enabled
 for technology_name in technologies_to_remove:
     all_technologies_dfs.pop(technology_name, None)
+
+save_data_to_file(all_technologies_dfs, f'output/all_technologies_dfs_{selected_system_id}_{year_of_interest}_supply:{supply_temp}_return:{return_temp}.pkl')
