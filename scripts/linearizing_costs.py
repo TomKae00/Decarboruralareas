@@ -7,7 +7,6 @@ from scripts.cost_functions import load_data
 
 from scripts.cost_functions import combined_data
 
-
 import yaml
 
 # Load the YAML configuration file

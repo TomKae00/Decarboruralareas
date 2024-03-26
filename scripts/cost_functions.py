@@ -20,6 +20,7 @@ year_of_interest = config['scenario']['year_of_interest']
 selected_system_id = config['scenario']['selected_system_id']
 #selected_system_id = snakemake.params.system_id
 
+
 # Define fixed params
 inflation_2024 = config['cost_functions']['inflation_2024']  # 3.53%
 inflation_2025 = config['cost_functions']['inflation_2025']  # 2.2%

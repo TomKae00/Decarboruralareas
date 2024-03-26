@@ -117,3 +117,4 @@ thh_series = temp_df['THH'] / 1000 # convert to MWh
 print(thh_series.sum())
 
 thh_series.to_csv(f'output/thh_series_{selected_system_id}_{year_of_interest}.csv', index=True)
+

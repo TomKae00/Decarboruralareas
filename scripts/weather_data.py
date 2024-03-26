@@ -73,3 +73,4 @@ temp_at_point_2022 = temp_2022.sel(x=x_point, y=y_point, method='nearest')
 temperature_series2022 = temp_at_point_2022.to_series() - 273.15
 temperature_series2022.to_csv(f"output/temperature_series2022_{selected_system_id}.csv", index=True)
 #temperature_series2022.to_csv(snakemake.output.temp2022)
+

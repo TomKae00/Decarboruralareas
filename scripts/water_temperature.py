@@ -45,3 +45,4 @@ water_temperature_interpolated = water_temperature_extended.interpolate(method='
 water_temperature = water_temperature_interpolated.loc[start_date:end_date]
 water_temperature = water_temperature['Temperatur (Wasser; OW-G)']
 water_temperature.to_csv(f'output/water_temperature_{year_of_interest}.csv', index=True)
+
