@@ -1,23 +1,56 @@
-selected_system_id: 'Brandenburg_Fernwaerme.1'  # The ID of the district heating system you want to analyze
-max_distance: 1000   # The maximum distance for proximity analysis in meters
 
-params:
-  fill_values: 0.0
-  r: 0.02
-  nyears: 1
-  year: 2020
+results_dir: 'results'
+
+
+###################
+# Scenario controls
+
+run: '2024-03-05'
+
+# wildcards
+scenario:
+  selected_system_id: #[
+    'Brandenburg_Fernwaerme.32' #, 'Brandenburg_Fernwaerme.2'
+  #]
+  year_of_interest: #[
+    '2018' #, '2020'
+  #]
+  supply_temp: #[
+    90 #,70, 110
+  #]
+  return_temp: #[
+    50 #,50
+  #]
+  costs_data_year: #[
+    '2025' #,'2030' ,'2035'
+  #]
+  r: #[
+    6 #,5 ,8
+  #]
+  electricity_price: #[
+    170 #,100 ,400
+  #]
+  co2_price: #[
+    55 #,60 ,70
+  #]
+  gas_price: #[
+    60 #,60 ,70
+  #]
+
+
 
 components_enabled:
-  central excess-heat heat pump: true
-  central sourced-water heat pump: true
+  central excess-heat heat pump: false
+  central sourced-water heat pump: false
+  central sourced-sea heat pump: false
   central air sourced heat pump: true
-  central H2 boiler: true
+  central H2 boiler: false
   central electric boiler: true
   central gas boiler: false
-  electrolysis AEC: true
-  electrolysis PEMEC: true
+  electrolysis AEC: false
+  electrolysis PEMEC: false
   central water tank storage: true
-  PTES: true
+  PTES: false
 
 
 min_temp_thresholds:
@@ -26,51 +59,82 @@ min_temp_thresholds:
   Seethermie: 0
   Abwaerme: 0
 
-temperature_adjustments:
-  Abwaerme: 50
+
+###################
+# fixed settings
+
+cost_functions: # also applies for linearizing_costs!!!!
+  inflation_2024: 0.0353  # 3.53%
+  inflation_2025: 0.022  # 2.2%
+  project_year: '2025'
+  Abwaerme: 50 # temperature of electrolysis excess heat
+  min_temp_thresholds:
+      Luft: 0
+      Flussthermie: 0
+      Seethermie: 0
+      Abwaerme: 0
+  cp: 1.1625
+  rho: 1000
+
+
+data_energieportal:
+  max_distance: 1000   # The maximum distance for proximity analysis in meters
+
+heat_demand:
+  base_temperature: 15  # Base temperature for HDD calculation
+  hot_water_demand_percentage: 25  # Percentage of total heat demand attributed to hot water
+  heating_season_start: 9  # September
+  heating_season_end: 4  # April
+
+financial_params:
+  fill_values: 0.0
+  r: 0.06
+  nyears: 1
+  year: 2025
+
 
 component_parameters:
   "central electric boiler":
     lower_limit: 150
     upper_limit: 20000
-    error_threshold: 80
+    error_threshold: 10
   "electrolysis AEC":
     lower_limit: 1000
     upper_limit: 1000000
-    error_threshold: 80
+    error_threshold: 10
   "electrolysis PEMEC":
     lower_limit: 1000
     upper_limit: 1000000
-    error_threshold: 80
+    error_threshold: 10
   "central gas boiler":
     lower_limit: 10
-    upper_limit: 20000
-    error_threshold: 80
+    upper_limit: 50000
+    error_threshold: 10
   "central H2 boiler":
     lower_limit: 10
     upper_limit: 20000
-    error_threshold: 80
+    error_threshold: 10
   "central excess-heat heat pump":
     lower_limit: 10
     upper_limit: 15000
-    error_threshold: 80
+    error_threshold: 10
   "central sourced-water heat pump":
     lower_limit: 10
     upper_limit: 15000
-    error_threshold: 80
+    error_threshold: 10
   "central air sourced heat pump":
     lower_limit: 10
     upper_limit: 15000
-    error_threshold: 80
+    error_threshold: 25
   "central sourced-sea heat pump":
     lower_limit: 10
     upper_limit: 15000
-    error_threshold: 80
+    error_threshold: 10
   "PTES":
     lower_limit: 5000
     upper_limit: 200000
     error_threshold: 70
   "central water tank storage":
-    lower_limit: 500
+    lower_limit: 50
     upper_limit: 50000
-    error_threshold: 70
+    error_threshold: 700
