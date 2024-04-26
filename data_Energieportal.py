@@ -52,4 +52,5 @@ stromerzeugung_wind_df = layer_data['bepo:esb_stromerzeugung_ee_wind']
 waermekataster_energie_fernwaerme_df = layer_data['bepo:esb_waermekataster_gebaeude_energie_fernwaerme']
 waermekataster_heizung_fernwaerme_df = layer_data['bepo:esb_waermekataster_gebaeude_heizung_waermenetz']
 heizgradtage_df = layer_data['bepo:esb_lfuklima_heizgradtage']
+windkraft_df = layer_data['bepo:Gemarkungen_Windfläche']
 # Perform data analysis or visualization with netze_df

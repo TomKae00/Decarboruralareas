@@ -44,5 +44,9 @@ water_temperature_interpolated = water_temperature_extended.interpolate(method='
 # Focus on the specified period for the final output
 water_temperature = water_temperature_interpolated.loc[start_date:end_date]
 water_temperature = water_temperature['Temperatur (Wasser; OW-G)']
-water_temperature.to_csv(f'output/water_temperature_{year_of_interest}.csv', index=True)
+water_temperature_original = water_temperature
+water_temperature_original.to_csv(f'output/water_temperature_original_{year_of_interest}.csv', index=True)
 
+water_temperature_adjusted = water_temperature_original
+water_temperature_adjusted.loc['2018-02-20 09:00:00':'2018-03-06 09:00:00'] = 2.9
+water_temperature_adjusted.to_csv(f'output/water_temperature_adjusted_{year_of_interest}.csv', index=True)

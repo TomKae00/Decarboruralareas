@@ -18,7 +18,7 @@ year_of_interest = config['scenario']['year_of_interest']
 # fixed settings
 base_temperature = config['heat_demand']['base_temperature']  # Base temperature for HDD calculation
 hot_water_demand_percentage = config['heat_demand']['hot_water_demand_percentage']  # Percentage of total heat demand attributed to hot water
-heating_season_start = config['heat_demand']['heating_season_start']  # September
+heating_season_start = config['heat_demand']['heating_season_start']  # oktober
 heating_season_end = config['heat_demand']['heating_season_end']  # April
 
 # gleich nochmal überprüfen
@@ -32,6 +32,9 @@ csv_file_path = 'data/energieportal/waermebedarf_fernwaerme_2022.csv'
 # Load the district heating data out of the fixed configuration variable and convert to pd.DataFrame
 brandenburg_fernwaerme_data = gpd.read_file(json_file_path)
 brandenburg_fernwaerme_df = pd.DataFrame(brandenburg_fernwaerme_data)
+brandenburg_fernwaerme_df_export = brandenburg_fernwaerme_df
+brandenburg_fernwaerme_df_export['geometry'] = 'MULTILINESTRING((...))'
+
 
 # Load the heat demand data of the csv file
 waermebedarf_fernwaerme_2022_df = pd.read_csv(csv_file_path, sep=';')
