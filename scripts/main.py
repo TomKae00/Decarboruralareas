@@ -3,11 +3,18 @@ import pypsa
 import pandas as pd
 import yaml
 import geopandas as gpd
+import pickle
+import logging
+import re
 
-from scripts.linearizing_costs import load_data_from_file
-
-with open('config.yaml', 'r') as file:
+with open('/Users/tomkaehler/Documents/Uni/BA/config.yaml', 'r') as file:
     config = yaml.safe_load(file)
+
+
+def load_data_from_file(filename):
+    with open(filename, 'rb') as f:
+        return pickle.load(f)
+
 
 # Define variable params for config and snakemake
 selected_system_id = config['scenario']['selected_system_id']
@@ -26,10 +33,14 @@ gas_price = config['scenario']['gas_price']
 # gas_price = snakemake.params.gas_price
 co2_price = config['scenario']['co2_price']
 # co2_price = snakemake.params.co2_price
+run = config['run']
+project_year = config['cost_functions']['project_year']
 
-max_potentials = gpd.read_file(f'output/max_potentials_{selected_system_id}.gpkg')
-temperature_series_outside = pd.read_csv(f'output/temperature_series_{selected_system_id}_{year_of_interest}.csv',
+max_potentials = gpd.read_file(f'/Users/tomkaehler/Documents/Uni/BA/output/max_potentials_{selected_system_id}.gpkg')
+temperature_series_outside = pd.read_csv(f'/Users/tomkaehler/Documents/Uni/BA/output/temperature_series_{selected_system_id}_{year_of_interest}.csv',
                                          index_col=0)
+erzeugerpreisindex = pd.read_csv('/Users/tomkaehler/Documents/Uni/BA/output/erzeugerpreisindex_extended.csv', index_col=0)
+
 T_out = temperature_series_outside['temperature']
 T_out.index = pd.to_datetime(T_out.index)
 
@@ -44,11 +55,15 @@ r = params['r']
 nyears = params['nyears']
 year = params['year']
 
-cost_file = f"data/cost_files/costs_{params['year']}.csv"
+cost_file = f"/Users/tomkaehler/Documents/Uni/BA/data/cost_files/costs_{params['year']}.csv"
 
-cop_series = load_data_from_file(f'output/cop_series_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.pkl')
+cop_series = load_data_from_file(f'/Users/tomkaehler/Documents/Uni/BA/output/cop_series_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.pkl')
 all_technologies_dfs = load_data_from_file(
-    f'output/all_technologies_dfs_{selected_system_id}_{year_of_interest}_supply:{supply_temp}_return:{return_temp}.pkl')
+    f'/Users/tomkaehler/Documents/Uni/BA/output/all_technologies_dfs_{selected_system_id}_{year_of_interest}_supply:{supply_temp}_return:{return_temp}.pkl')
+redispatch_wind_series = pd.read_csv(f'/Users/tomkaehler/Documents/Uni/BA/output/redispatch_wind_series_{selected_system_id}_{year_of_interest}',
+                                     index_col=0)
+redispatch_wind_series.index = pd.to_datetime(redispatch_wind_series.index)
+redispatch_wind_series = redispatch_wind_series['0']
 
 
 def calculate_annuity(n, r):
@@ -143,6 +158,7 @@ def update_capacity(technology_df, cop_df):
             min_cop = cop_df[cop_df[name] > 0][name].min()
             technology_df.at[name, 'Start Capacity'] /= min_cop
             technology_df.at[name, 'End Capacity'] /= min_cop
+            technology_df.at[name, 'M'] /= min_cop
 
 
 def calculate_average_waermepot(max_potentials, type_name, start_date, end_date, freq):
@@ -204,14 +220,30 @@ n.add("Bus", "heat")
 
 n.add('Bus', 'gas')
 
-#n.add('Bus', 'central_water_storage')
+if config.get('components_enabled', {}).get('redispatch wind power', False):
+    # n.add('Bus', 'wind_redispatch')
+    p_max_pu_redispatch = redispatch_wind_series / redispatch_wind_series.max()
+    n.add("Generator",
+          "windfarm",
+          bus='power',
+          p_nom_extendable=True,
+          p_nom_max=redispatch_wind_series.max(),
+          p_max_pu=p_max_pu_redispatch,
+          marginal_cost=20,
+          )
 
-# add generator for wind generation
-# n.add("Generator",
-#      "windfarm",
-#      bus="power",
-#      p_nom_extendable=True,
-#      p_max_pu=wind_series_for_pypsa)
+
+#    n.add('Line',
+#          'Wind connect heat',
+#          bus0='wind_redispatch',
+#          bus1='power',
+#          #p_nom_extendable=True,
+#          length=3.4,
+#          capital_cost=100 * 3.4,
+#          x=0.1,
+#          s_nom=100
+#          )
+
 
 n.add("Generator",
       "electricity market",
@@ -226,30 +258,6 @@ n.add('Generator',
       marginal_cost=gas_price + co2_price * result.at['gas', 'CO2 intensity'],
       p_nom_extendable=True)
 
-#n.add('Link',
-#      'central water tank charger',
-#      bus0='heat',
-#      bus1='central_water_storage',
-#      efficiency=result.loc["water tank charger", "efficiency"],
-#      p_nom_extendable=True
-#      )
-
-#n.add('Link',
-#      'central water tank discharger',
-#      bus0='central_water_storage',
-#      bus1='heat',
-#      efficiency=result.loc["PTES discharger", "efficiency"],
-#      p_nom_extendable=True
-#      )
-## add hot water Storage
-#n.add("Store",
-#      'central_water_tank',
-#      bus="central_water_storage",
-#     capital_cost=result.loc["PTES charger", "fixed"],
-#      e_cyclic=True,
-#      e_nom_extendable=True,
-#      )
-
 if "central water tank storage" in all_technologies_dfs:
     central_water_tank = all_technologies_dfs["central water tank storage"]
     n.add("Bus", "central_water_storage")
@@ -258,6 +266,7 @@ if "central water tank storage" in all_technologies_dfs:
           'central water tank charger',
           bus0='heat',
           bus1='central_water_storage',
+          bus2='',
           efficiency=result.loc["water tank charger", "efficiency"],
           p_nom_extendable=True
           )
@@ -266,6 +275,7 @@ if "central water tank storage" in all_technologies_dfs:
           'central water tank discharger',
           bus0='central_water_storage',
           bus1='heat',
+          bus2='',
           efficiency=result.loc["water tank discharger", "efficiency"],
           p_nom_extendable=True
           )
@@ -279,7 +289,7 @@ if "central water tank storage" in all_technologies_dfs:
            e_nom_extendable=True,
            )
 
-if 'PTES' in all_technologies_dfs and supply_temp <= 90 + 273.15:
+if 'PTES' in all_technologies_dfs and supply_temp <= 95 + 273.15:
     PTES = all_technologies_dfs["PTES"]
     n.add('Bus', 'PTES')
 
@@ -287,7 +297,8 @@ if 'PTES' in all_technologies_dfs and supply_temp <= 90 + 273.15:
           'PTES charger',
           bus0='heat',
           bus1='PTES',
-          efficiency=result.loc["water tank charger", "efficiency"],
+          bus2='',
+          efficiency=result.loc["PTES charger", "efficiency"],
           p_nom_extendable=True
           )
 
@@ -295,7 +306,8 @@ if 'PTES' in all_technologies_dfs and supply_temp <= 90 + 273.15:
           'PTES discharger',
           bus0='PTES',
           bus1='heat',
-          efficiency=result.loc["water tank discharger", "efficiency"],
+          bus2='',
+          efficiency=result.loc["PTES discharger", "efficiency"],
           p_nom_extendable=True
           )
 
@@ -309,48 +321,53 @@ if 'PTES' in all_technologies_dfs and supply_temp <= 90 + 273.15:
            e_nom_extendable=True,
            )
 
-n.add("Bus", "battery_storage")
+if config.get('components_enabled', {}).get('battery', False):
+    n.add("Bus", "battery_storage")
 
-n.add(
-    "Link",
-    "battery charger",
-    bus0='power',
-    bus1='battery_storage',
-    carrier="battery charger",
-    # the efficiencies are "round trip efficiencies"
-    efficiency=result.loc["battery inverter", "efficiency"] ** 0.5,
-    capital_cost=result.loc["battery inverter", "fixed"],
-    marginal_cost=result.loc["battery inverter", "VOM"],
-    p_nom_extendable=True
-)
+    n.add(
+        "Link",
+        "battery charger",
+        bus0='power',
+        bus1='battery_storage',
+        bus2='',
+        # the efficiencies are "round trip efficiencies"
+        efficiency=result.loc["battery inverter", "efficiency"] ** 0.5,
+        capital_cost=(result.loc["battery inverter", "fixed"] * (erzeugerpreisindex.loc[
+            'Ni-Cad-,Ni-Metallhydr-,Li-Ion-,Li-Polym-Akkus', project_year] /
+            erzeugerpreisindex.loc['Ni-Cad-,Ni-Metallhydr-,Li-Ion-,Li-Polym-Akkus', '2020'])).round(3),
+        marginal_cost=result.loc["battery inverter", "VOM"],
+        p_nom_extendable=True
+    )
 
-# add battery storage battery inverter
-n.add("Store",
-      "battery store",
-      bus="battery_storage",
-      e_cyclic=True,
-      capital_cost=result.loc["battery storage", "fixed"],
-      efficiency=result.loc["battery storage", "efficiency"],
-      e_nom_extendable=True
-      )
+    # add battery storage battery inverter
+    n.add("Store",
+          "battery store",
+          bus="battery_storage",
+          e_cyclic=True,
+          capital_cost=(result.loc["battery storage", "fixed"] * (erzeugerpreisindex.loc[
+            'Ni-Cad-,Ni-Metallhydr-,Li-Ion-,Li-Polym-Akkus', project_year] /
+            erzeugerpreisindex.loc['Ni-Cad-,Ni-Metallhydr-,Li-Ion-,Li-Polym-Akkus', '2020'])).round(3),
+          e_nom_extendable=True
+          )
 
-n.add(
-    "Link",
-    "battery discharger",
-    bus0='battery_storage',
-    bus1='power',
-    carrier="battery discharger",
-    efficiency=result.loc["battery inverter", "efficiency"] ** 0.5,
-    p_nom_extendable=True
-)
+    n.add(
+        "Link",
+        "battery discharger",
+        bus0='battery_storage',
+        bus1='power',
+        bus2='',
+        efficiency=result.loc["battery inverter", "efficiency"] ** 0.5,
+        p_nom_extendable=True
+    )
 
 # add H2 storage
 n.add("Bus", "H2")
-# n.add('Bus', 'Excess_heat')
-# n.add("Bus", "H2_storage")
+
 
 if "electrolysis AEC" in all_technologies_dfs:
     electrolysis_AEC = all_technologies_dfs["electrolysis AEC"]
+    #if "H2" not in n.buses.index:  # Check if H2 bus is not already added
+    #    n.add("Bus", "H2")
     n.madd("Link",
            electrolysis_AEC.index,
            bus0=["power"],
@@ -365,6 +382,8 @@ if "electrolysis AEC" in all_technologies_dfs:
 
 if "electrolysis PEMEC" in all_technologies_dfs:
     electrolysis_PEMEC = all_technologies_dfs["electrolysis PEMEC"]
+    #if "H2" not in n.buses.index:  # Check if H2 bus is not already added
+    #    n.add("Bus", "H2")
     n.madd("Link",
            electrolysis_PEMEC.index,
            bus0=["power"],
@@ -377,12 +396,62 @@ if "electrolysis PEMEC" in all_technologies_dfs:
            p_nom_extendable=True
            )
 
+if config.get('components_enabled', {}).get('H2 store', False):
+    n.add("Bus", "H2_storage")
+
+    n.add(
+        "Link",
+        "H2 charger",
+        bus0='H2',
+        bus1='H2_storage',
+        bus2='',
+        # the efficiencies are "round trip efficiencies"
+        efficiency=result.loc["hydrogen storage tank type 1 including compressor", "efficiency"] ** 0.5,
+        p_nom_extendable=True
+    )
+
+    # add battery storage battery inverter
+    n.add("Store",
+          "H2 store",
+          bus="H2_storage",
+          e_cyclic=True,
+          capital_cost=(result.loc["hydrogen storage tank type 1 including compressor", "fixed"] * (
+          erzeugerpreisindex.loc['Behälter f. verdicht. od. verflüss. Gase,aus Eisen', project_year] /
+          erzeugerpreisindex.loc['Behälter f. verdicht. od. verflüss. Gase,aus Eisen', '2020'])).round(3),
+          e_nom_extendable=True
+          )
+
+    n.add(
+        "Link",
+        "H2 discharger",
+        bus0='H2_storage',
+        bus1='H2',
+        bus2='',
+        efficiency=result.loc["hydrogen storage tank type 1 including compressor", "efficiency"] ** 0.5,
+        p_nom_extendable=True
+    )
+
+if "central H2 boiler" in all_technologies_dfs:
+    central_H2_boiler = all_technologies_dfs["central H2 boiler"]
+    n.madd("Link",
+           central_H2_boiler.index,
+           bus0=["H2"],
+           bus1=["heat"],
+           bus2=[''],
+           p_nom_extendable=True,
+           efficiency=central_H2_boiler["efficiency"],
+           capital_cost=central_H2_boiler["fixed"],
+           marginal_cost=central_H2_boiler["VOM"]
+           )
+
+
 """""
 Die Annahme stimmt soweit bus0 beschreibt mein input und jeglicher weiterer Bus outputs bzw. input wenn negativ. 
 Die efficiency wird in das Verhältnis gesetzt zum bus0 
 """""
 
 if "central excess-heat heat pump" in all_technologies_dfs:
+    n.add('Bus', 'Excess_heat')
     eh_electrolysis_hp = all_technologies_dfs["central excess-heat heat pump"]
     cop_eh_hp = calculate_cop(eh_electrolysis_hp, cop_series)
     update_capacity(eh_electrolysis_hp, cop_eh_hp)
@@ -455,27 +524,6 @@ if "central sourced-sea heat pump" in all_technologies_dfs:
            p_nom_extendable=True
            )
 
-n.add("Store",
-      "H2 Speicher",
-      bus="H2",
-      e_cyclic=True,
-      capital_cost=result.loc["hydrogen storage tank type 1 including compressor", "fixed"],
-      marginal_cost=result.loc["hydrogen storage tank type 1 including compressor", 'VOM'],
-      e_nom_extendable=True)
-
-if "central H2 boiler" in all_technologies_dfs:
-    central_H2_boiler = all_technologies_dfs["central H2 boiler"]
-    n.madd("Link",
-           central_H2_boiler.index,
-           bus0=["H2"],
-           bus1=["heat"],
-           p_nom_extendable=True,
-           carrier=["H2 turbine"],
-           efficiency=central_H2_boiler["efficiency"],
-           capital_cost=central_H2_boiler["fixed"],
-           marginal_cost=central_H2_boiler["VOM"]
-           )
-
 if "central air sourced heat pump" in all_technologies_dfs:
     central_air_hp = all_technologies_dfs["central air sourced heat pump"]
     cop_air_hp = calculate_cop(central_air_hp, cop_series)
@@ -485,6 +533,7 @@ if "central air sourced heat pump" in all_technologies_dfs:
            central_air_hp.index,
            bus0=["power"],  # Assuming all heat pumps are connected to the same bus
            bus1=["heat"],  # Assuming all heat pumps supply to the same bus
+           bus2=[''],
            p_nom_extendable=True,
            efficiency=cop_air_hp,
            capital_cost=central_air_hp["fixed"],
@@ -498,6 +547,7 @@ if "central electric boiler" in all_technologies_dfs:
            central_electric_boiler.index,
            bus0=["power"],
            bus1=["heat"],
+           bus2=[''],
            efficiency=central_electric_boiler["efficiency"],
            capital_cost=central_electric_boiler["fixed"],
            marginal_cost=central_electric_boiler["VOM"],
@@ -556,6 +606,21 @@ def custom_constraints(n, sns):
     binary_var = n.model["Link-build"]
     print(binary_var)
 
+    def get_component_base_name(idx):
+        return re.sub(r'_\d+$', '', idx)
+
+    # Group indices by component base names
+    def add_exclusive_selection_constraints():
+        # Group indices by component base names within this function
+        grouped_indices = all_components_df.groupby(all_components_df.index.map(get_component_base_name))
+
+        for component_base, idx_group in grouped_indices:
+            indices = idx_group.index
+            if len(indices) > 1:  # Apply constraint if multiple segments exist
+                # Create a list of constraints enforcing that the sum of binary vars for these indices <= 1
+                constraints = {idx: binary_var[idx] for idx in indices}
+                n.model.add_constraints(sum(constraints.values()) <= 1, name=f"exclusive_{component_base}")
+
     def link_constraint():
         if links_df.empty or not n.links.p_nom_extendable.any():
             print("Skipping constraint due to empty links_df or no extendable links.")
@@ -563,17 +628,14 @@ def custom_constraints(n, sns):
 
         # Get the variable p_nom_opt for the heat pumps
         p_nom_opt = n.model["Link-p_nom"].loc[links_df.index]
-        print(p_nom_opt)
 
         # by this way we can access the input and output per snapshot, so we are able to get partial load behavior
         # p_one_component = n.model["Link-p"].loc[sns, all_components_df.index]
         # print(p_one_component)
 
         p_nom_min = links_df["Start Capacity"].loc[links_df.index]
-        print(p_nom_min)
 
         m = links_df["M"].loc[links_df.index]
-        print(m)
 
         for comp in links_df.index:
             # Apply the constraints
@@ -607,11 +669,12 @@ def custom_constraints(n, sns):
             n.model.add_constraints(e_nom_opt[comp] - binary_var[comp] * m[comp] >= e_nom_min[comp] - m[comp],
                                     name=f"Link-p_nom-lowerlimit-{comp}")
 
+    add_exclusive_selection_constraints()
     link_constraint()
     store_constraint()
 
 
-thh_series = pd.read_csv(f'output/thh_series_{selected_system_id}_{year_of_interest}.csv', index_col=0)
+thh_series = pd.read_csv(f'/Users/tomkaehler/Documents/Uni/BA/output/thh_series_{selected_system_id}_{year_of_interest}.csv', index_col=0)
 thh_series = thh_series['THH']
 thh_series.index = pd.to_datetime(thh_series.index)
 
@@ -621,10 +684,28 @@ n.add("Load",
       bus="heat",
       p_set=thh_series)
 
+logging.getLogger('pypsa').setLevel(logging.WARNING)
+logging.getLogger('gurobipy').setLevel(logging.WARNING)
+
 # Specify the solver options
 solver_options = {
     'gurobi': {
-        'BarHomogeneous': 1  # Setting BarHomogeneous parameter for Gurobi
+        'LogToConsole': 0,
+        'MIPFocus': 1, #for H2 storage
+        'MIPGap': 0.03,
+        # 'TimeLimit': 3600,
+        'Heuristics': 0.1, #for H2 storage
+        # 'Cuts': 1,
+        # 'Threads': 8,
+        # 'Presolve': 1,
+        # 'NumericFocus': 3,       # Favour numeric stability over speed
+        # 'FeasibilityTol': 1e-5,
+        # 'OptimalityTol': 1e-5,
+        # 'Method': 3,
+        # 'NodeMethod': 2,
+        # 'crossover': 0,
+        # 'AggFill': 0,
+        # 'PreDual': 0
     }
 }
 
@@ -650,21 +731,21 @@ n.generators_t.p.plot()
 # optimal capacities district heating store
 print(n.stores.e_nom_opt)
 # energy in store
-n.stores_t.e.plot()
+print(n.links.p_nom_opt)
 
 # plot results (mal gucken was das kann und wofür mann das braucht)
 # n.generators_t.p.plot()
-# n.plot()
 
 # get statistics (mal gucken was das kann und wofür mann das braucht)
 statistics = n.statistics().dropna()
-curtailment = n.statistics.curtailment()  # nicht klar was dies macht
-
-n.statistics.energy_balance()
+#balance = n.statistics.energy_balance()
+#print(balance)
 
 n.export_to_csv_folder(
-    f"output/results_{selected_system_id}_{year_of_interest}_supply:{supply_temp}_return:{return_temp}_elecprice_{electricity_price}")
+    f"/Users/tomkaehler/Documents/Uni/BA/output/results_{selected_system_id}_{year_of_interest}_supply:{supply_temp}_return:{return_temp}_elecprice_{electricity_price}_gasprice_{gas_price}_CO2price{co2_price}_run_{run}")
 print("csv exported sucessfully")
+#n.export_to_netcdf(
+#    f"output/results_{selected_system_id}_{year_of_interest}_supply:{supply_temp}_return:{return_temp}_elecprice_{electricity_price}_gasprice_{gas_price}_CO2price{co2_price}_run_{run}.nc")
 
 links = n.links
 components = n.components
@@ -672,9 +753,18 @@ components = n.components
 thh_sum = thh_series.sum()
 
 total_system_cost = n.objective
+
 print("Total System Cost:", total_system_cost)
-print(n.investment_period_weightings)
 waermegestehungskosten = total_system_cost / thh_sum
 print("Wärmegestehungskosten:", waermegestehungskosten)
 
-# Netzverlsute intgrieren
+dict_summary = {
+    "thh_sum": [thh_sum],
+    "total_system_cost": [total_system_cost],
+    "waermegestehungskosten": [waermegestehungskosten]
+}
+
+summary = pd.DataFrame(dict_summary)
+
+# Save the DataFrame to a CSV file
+summary.to_csv(f'/Users/tomkaehler/Documents/Uni/BA/output/_{selected_system_id}_{year_of_interest}_supply:{supply_temp}_return:{return_temp}_elecprice_{electricity_price}_gasprice_{gas_price}_CO2price{co2_price}_run_{run}.csv')
