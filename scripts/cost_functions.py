@@ -48,7 +48,7 @@ erzeugerpreisindex = erzeugerpreisindex.set_index('Gewerbl Produkte')
 # Apply inflation rates for 2024 and 2025 to the erzeugerpreisindex
 erzeugerpreisindex['2024'] = erzeugerpreisindex['2023'] * (1 + inflation_2024)
 erzeugerpreisindex['2025'] = erzeugerpreisindex['2024'] * (1 + inflation_2025)
-erzeugerpreisindex.to_csv(f'output/erzeugerpreisindex_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.csv')
+erzeugerpreisindex.to_csv('output/erzeugerpreisindex_extended.csv')
 
 #
 source_to_technology_name = {
@@ -71,7 +71,7 @@ available_sources = np.unique(np.append(unique_sources_from_df, [
 
 # read the temperature_series for the following calculations
 temperature_series_outside = pd.read_csv(f'output/temperature_series_{selected_system_id}_{year_of_interest}.csv', index_col=0)
-water_temperature = pd.read_csv(f'output/water_temperature_{year_of_interest}.csv', index_col=0)
+water_temperature = pd.read_csv(f'output/water_temperature_adjusted_{year_of_interest}.csv', index_col=0)
 
 temperature_series_outside = temperature_series_outside['temperature']
 temperature_series_flussthermie = water_temperature['Temperatur (Wasser; OW-G)']
@@ -171,6 +171,7 @@ def calculate_fluid_1000(G, H, I, J, K, supply_temp, dT_lift, T_source_c, min_te
     not_condition = ~condition
     fluid_series[not_condition] = (G + H * dT_lift[not_condition] + I * supply_temp + J * dT_lift[not_condition]**2 +
                                  K * supply_temp * dT_lift[not_condition])
+    fluid_series = fluid_series.round(2)
 
     return fluid_series
 
@@ -196,7 +197,7 @@ cop_series = {}
 results_list = []
 
 # Main Calculation
-sizes_kw_th = np.arange(200, 15001, 200)  # Heat pump sizes from 100 to 5000 kW_th # einfügen, dass null nicht genutzt werden kann
+sizes_kw_th = np.arange(200, 50001, 200)  # Heat pump sizes from 100 to 5000 kW_th # einfügen, dass null nicht genutzt werden kann
 
 for hp_source in available_sources:
     min_temp_threshold = min_temp_thresholds[hp_source]
@@ -240,8 +241,6 @@ for hp_source in available_sources:
     # Convert the list of dictionaries into a DataFrame
 results_df = pd.DataFrame(results_list)
 
-results_df.to_csv(f'output/heat_pump_analysis_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.csv', index=False)
-
 """""
 pre-screening analysis of the different fluids for the used sources by using the stroed data about the costs 
 get data in dataframes and then print them later in analysis 
@@ -256,11 +255,13 @@ efficiency_cost_df = pd.merge(average_cop_df, mean_specific_costs_df, on=['Techn
 # Calculate the efficiency-cost ratio
 efficiency_cost_df['Efficiency-Cost Ratio'] = efficiency_cost_df['Average COP'] / efficiency_cost_df['Mean Specific Costs']
 
+efficiency_cost_df.to_csv(f'output/pre_screening_HP_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.csv')
+
 specific_source = 'central air sourced heat pump'
 source_df = efficiency_cost_df[efficiency_cost_df['Technology'] == specific_source]
 
 # Identify fluids within a certain tolerance of the best ratio for each source
-tolerance = 0.05  # 5% tolerance for example
+tolerance = 0.1  # 5% tolerance for example
 
 
 # Function to filter fluids based on tolerance
@@ -277,10 +278,7 @@ filtered_results_df = pd.merge(results_df, selected_fluids_df,
                                on=['Technology', 'fluid'],
                                how='inner')
 
-# Now, filtered_results_df contains only the data for selected fluids per heat pump source
 
-
-# If you wish to convert this list to a DataFrame for further analysis or export
 
 costs_data['Size (kW)'] = costs_data['Size (MW)'] * 1000
 costs_data.drop('Size (MW)', axis=1, inplace=True)

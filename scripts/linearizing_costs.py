@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import pickle
+from sympy import integrate
 from scripts.cost_functions import save_data_to_file
-from scripts.cost_functions import load_data
 
 from scripts.cost_functions import combined_data
 
@@ -39,11 +39,12 @@ dT = supply_temp - return_temp
 component_parameters_config = config['component_parameters']
 
 
-power_law_models_df = load_data(f'output/power_law_models_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.csv')
-erzeugerpreisindex = load_data(f'output/erzeugerpreisindex_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.csv')
+power_law_models_df = pd.read_csv(f'output/power_law_models_{selected_system_id}_{year_of_interest}_supply:{supply_temp}.csv', index_col=0)
+erzeugerpreisindex = pd.read_csv('output/erzeugerpreisindex_extended.csv', index_col=0)
 
 
 zuwachs_water_tank = erzeugerpreisindex.loc['Andere Behaelter f. fluessige Stoffe,aus Eisen,Stahl', project_year] / 100
+zuwachs_PTES = erzeugerpreisindex.loc['Andere Tafeln,Platten,Folien,Bänder,aus Polyureth', project_year] / 100
 
 # Extract component parameters from config and filter for specific storage types
 storage_type = ['PTES', 'central water tank storage']  # List the storage types you're interested in
@@ -85,8 +86,8 @@ def generate_cost_function(alpha, beta):
 
 def cost_per_kWh_PTES(x, dT, cp, rho):
     # Calculate cost only where x > 0, otherwise return 0
-    return np.where(x > 0, (((0.9 + 2.44 * 10**(-5) * x) * 10**6) / (x * dT * cp * rho)) * 10**6, 0)
-
+    return np.where(x > 0, (((0.9 + 2.44 * 10**(-5) * zuwachs_PTES * x) * 10**6 ) / (x * dT * cp * rho)) * 10**6, 0)
+# zuwachs water tank stimmt nicht für PTES und ist eine weitere Annahme
 
 def cost_per_kWh_central_water_tank_storage(x, dT, cp, rho):
     # Calculate cost only where x > 0, otherwise return 0
@@ -123,20 +124,35 @@ for component, row in power_law_models_df.iterrows():  # component is obtained f
 def constant_cost_approx_with_dynamic_segments(cost_function, lower_limit, upper_limit, error_threshold):
     def calculate_average_error_for_intervals(num_intervals):
         log_intervals = np.linspace(np.log(lower_limit), np.log(upper_limit), num_intervals + 1)
+        # die Intervalle werden in logarithmischer Skala festgelegt, also die Abstände der Intervalle
+        # mit linepace werden regelmäßige Abstände zwiuschen lower_limit und upper_limit festgelgt. Die Abstände werden durch die Anzahl der Intervalle berechnet
+        # für weitere Informationen siehe Dokumentation numpy
         intervals = np.exp(log_intervals)
-
+        intervals = np.round(intervals, 0)
+        # die Intervalle werden in normales Koordinatensystem umgewndelt
         constant_costs = []
         all_errors = []
+
         for i in range(len(intervals) - 1):
+            #zählt Anzahl an Intervalen
             start, end = intervals[i], intervals[i + 1]
-            x_interval = np.linspace(start, end, 100)
+            # start und end beschreiben Anfang und Ende der Intevalle bzw. der gesetzten Punkte durch linspace
+            x_interval = np.linspace(start, end, 1000)
+            # für die einzelnen Intervalle werden 1000 Punkte hinzugefügt
+            #print(x_interval)
             y_interval = cost_function(x_interval)
+            #print(y_interval)
             average_cost = np.mean(y_interval)
+            average_cost = round(average_cost, 3)
+            #print(average_cost)
             constant_costs.append(average_cost)
+            # hizufügen zur Liste
             errors = np.abs(y_interval - average_cost)
+            #print(errors)
             all_errors.extend(errors)
 
         return np.mean(all_errors), intervals, constant_costs
+        #hier wird dann der durchschnittliche error dann auf der Basis von allen eingetragen error in der Liste berechnet
 
     # Initial setup
     num_intervals = 5  # Start with a minimum number of intervals
@@ -208,7 +224,10 @@ for component_name, df in component_dfs.items():
 
     if component_name in storage_type:
         df['Start Capacity'] = df['Start Capacity'] * rho * dT * cp * 1e-6  # Convert to MWh
+        df['Start Capacity'] = np.round(df['Start Capacity'], 3)
         df['End Capacity'] = df['End Capacity'] * rho * dT * cp * 1e-6
+        df['End Capacity'] = np.round(df['End Capacity'], 3)
+        df['Constant Cost'] = np.round(df['Constant Cost'], 0)
     else:
         df['Start Capacity'] = df['Start Capacity'] / 1000  # Convert kW to MW
         df['End Capacity'] = df['End Capacity'] / 1000

@@ -3,12 +3,23 @@ import matplotlib.pyplot as plt
 import geopandas as gpd
 import contextily as ctx
 import yaml
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+import netCDF4 as nc
+import matplotlib.dates as mdates
+
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    "font.serif": ["Latin Modern Roman"],
+    "font.size": 16  # Match the font size used in your LaTeX document
+})
 
 with open('/Users/tomkaehler/Documents/Uni/BA/config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 selected_system_id = config['scenario']['selected_system_id']
-
+year_of_interest = config['scenario']['year_of_interest']
 
 # Initialize a dictionary to hold combined data for each series type
 combined_data_dict = {
@@ -105,11 +116,13 @@ selected_system_id = config['scenario']['selected_system_id']
 path_all_close_potentials = f"output/all_close_potentials_{selected_system_id}.gpkg"
 path_max_potentials = f"output/max_potentials_{selected_system_id}.gpkg"
 path_selected_system = f"output/selected_system_{selected_system_id}.gpkg"
+path_wind_potentials = f"output/wind_potentials_{selected_system_id}.gpkg"
 
 # Read the GeoPackage files using the new function, converting to EPSG:3857 for plotting
 all_close_potentials = read_geopackage(path_all_close_potentials, target_crs="EPSG:3857")
 max_potentials = read_geopackage(path_max_potentials, target_crs="EPSG:3857")
 selected_system = read_geopackage(path_selected_system, target_crs="EPSG:3857")
+wind_potentials = read_geopackage(path_wind_potentials, target_crs="EPSG:3857")
 
 all_close_potentials = all_close_potentials.simplify(tolerance=0.1, preserve_topology=True)
 max_potentials = max_potentials.simplify(tolerance=0.1, preserve_topology=True)
@@ -117,26 +130,44 @@ max_potentials = max_potentials.simplify(tolerance=0.1, preserve_topology=True)
 #all_close_potentials = all_close_potentials.geometry.centroid
 #max_potentials = max_potentials.geometry.centroid
 
-fig, ax = plt.subplots(figsize=(10, 10))
-
 # Add the layers to the plot
 #all_close_potentials.plot(ax=ax, color='blue', alpha=0.3, label='All Close Potentials')  # Adjusted alpha for visibility
 #max_potentials.plot(ax=ax, color='red', marker='*', markersize=50, label='Max Potential')  # Adjusted markersize for distinction
-selected_system.plot(ax=ax, color='red', marker='^', markersize=10, label='Selected System')  # Ensure this is plotted distinctly
+fig, ax = plt.subplots(figsize=(16, 10))
 
-# Add basemap
-ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik)
+# Plot the layers with semi-transparent markers
+wind_potentials_plot = wind_potentials.plot(ax=ax, color='blue', alpha=0.5, marker='*', markersize=30, label='Wind Potentialfläche')
+selected_system_plot = selected_system.plot(ax=ax, color='red', alpha=0.5, marker='^', markersize=10, label='Fernwärmenetz')
 
-# Set the bounds
-bounds = selected_system.total_bounds
-margin = 0.2 * (bounds[2] - bounds[0])
-ax.set_xlim(bounds[0] - margin, bounds[2] + margin)
-ax.set_ylim(bounds[1] - margin, bounds[3] + margin)
+legend_elements = [Line2D([0], [0], color='red', lw=2, label='Fernwärmenetz'),
+                   Patch(facecolor='blue', edgecolor='blue', alpha=0.5, label='Wind Potentialfläche')]
 
-# Remove axis
-ax.axis('off')
+# Get the current x and y limits before adding the basemap
+xlim = ax.get_xlim()
+ylim = ax.get_ylim()
 
-# Add legend
-ax.legend()
+# Expand the x-axis limits equally on both sides
+delta_x = (xlim[1] - xlim[0]) * 0.6  # Adjust the factor as necessary
+delta_y = (ylim[1] - ylim[0]) * 0.05  # For y-axis adjustment
+ax.set_xlim(xlim[0] - delta_x / 2, xlim[1] + delta_x / 2)
+ax.set_ylim(ylim[0] - delta_y / 2, ylim[1] + delta_y / 2)
 
+# Add the basemap after setting the axis limits
+ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik, zoom=13)
+
+# Create the legend, using handles and labels to ensure all items are included
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1, 1), title='Legende')
+
+# Hide the axis for a clean look
+ax.set_axis_off()
+
+# Adjust the layout and the canvas so that the figure and axes are drawn just before saving/showing
+fig.canvas.draw()
+ax.set_axis_off()
+fig.tight_layout()
+
+plt.savefig('Teltow_Standort.pdf', format='pdf', dpi=1200)
+
+# Display the plot
 plt.show()
