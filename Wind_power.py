@@ -6,6 +6,7 @@ from atlite.gis import ExclusionContainer
 import xarray as xr
 from shapely.ops import unary_union
 import networkx as nx
+import numpy as np
 import yaml
 
 
@@ -18,9 +19,18 @@ selected_system_id = config['scenario']['selected_system_id']
 year_of_interest = config['scenario']['year_of_interest']
 #year_of_interest = snakemake.params.year_of_interest
 
+start_date = f'{year_of_interest}-01-01'
+end_date = f'{year_of_interest}-12-31 23:00'
+
+timestamps = pd.date_range(start=start_date, end=end_date, freq='h')
 
 electricity_market_file = f"data/electricity_price/energy-charts_Stromproduktion_und_Boersenstrompreise_in_Deutschland_{year_of_interest}.csv"
 electricity_market = pd.read_csv(electricity_market_file)
+
+electricity_market.index = timestamps
+electricity_market = electricity_market.drop('Datum (MEZ)', axis=1)
+
+electricity_market = electricity_market['Day Ahead Auktion Preis (EUR/MWh; EUR/tCO2)']
 
 pa = gpd.read_file('data/RLI-potentialareas_wind_pv_v1.0/data/potentialarea_wind_settlement-1000m.gpkg')
 pa = pa.set_index("id").drop(['country_id'], axis=1)
@@ -45,6 +55,7 @@ Reading shapefile Finsterwalde district heating Netz
 """
 
 selected_system = gpd.read_file(f'output/selected_system_{selected_system_id}.gpkg')
+selected_system = selected_system.to_crs("EPSG:3035")
 
 # Example: Spatial join with a maximum distance of 'y' meters
 max_distance = 10e3  # Set 'y' to your desired maximum distance
@@ -52,7 +63,7 @@ close_areas = gpd.sjoin_nearest(joined, selected_system, max_distance=max_distan
 
 
 #close_areas['area'] = close_areas.geometry.area
-min_area = 0.5  # Mindestfläche in Quadratmetern
+min_area = 0.5  # Mindestfläche in Quadratmetern km
 close_areas = close_areas[close_areas['area_wind'] >= min_area]
 
 
@@ -82,6 +93,11 @@ combined_areas = gpd.GeoDataFrame({'geometry': new_geometries}, crs=close_areas.
 combined_areas.plot()
 plt.show()
 
+max_area = close_areas['area_wind'].max()
+row_max_area = close_areas[close_areas['area_wind'] == max_area]
+max_area_geometry = row_max_area['geometry']
+max_area_geometry.to_file(f"output/wind_potentials_{selected_system_id}.gpkg", driver="GPKG")
+
 """
 Hier neuer Abschnitt 
 """
@@ -91,7 +107,7 @@ countries = gpd.read_file(url).set_index("name")
 
 excluder = ExclusionContainer(crs=3035)
 
-cutout = atlite.Cutout("input/cutout_germany/germany_2019.nc")
+cutout = atlite.Cutout(f"input/cutout_germany/germany_{year_of_interest}.nc")
 
 A = cutout.availabilitymatrix(combined_areas, excluder)
 
@@ -123,4 +139,14 @@ plt.show()
 total_wind_power = wind.sum(dim='time')
 max_power_index = total_wind_power.argmax(dim='dim_0')
 max_power_series = wind.isel(dim_0=max_power_index)
-wind_series_for_pypsa = max_power_series.to_series()
+wind_series = max_power_series.to_series()
+
+redispatch = electricity_market <= 0
+
+negative_values_count = (electricity_market <= 0).sum()
+print("Number of values less than 0:", negative_values_count)
+
+redispatch_wind_series = np.where(redispatch, wind_series, 0)
+
+redispatch_wind_series = pd.Series(redispatch_wind_series, index=wind_series.index)
+redispatch_wind_series.to_csv(f'output/redispatch_wind_series_{selected_system_id}_{year_of_interest}')
