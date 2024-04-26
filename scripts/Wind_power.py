@@ -10,7 +10,7 @@ import numpy as np
 import yaml
 
 
-with open('config.yaml', 'r') as file:
+with open('../config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 # Snakemake parameter for selected system and max distance
@@ -32,7 +32,7 @@ electricity_market = electricity_market.drop('Datum (MEZ)', axis=1)
 
 electricity_market = electricity_market['Day Ahead Auktion Preis (EUR/MWh; EUR/tCO2)']
 
-pa = gpd.read_file('data/RLI-potentialareas_wind_pv_v1.0/data/potentialarea_wind_settlement-1000m.gpkg')
+pa = gpd.read_file('../data/RLI-potentialareas_wind_pv_v1.0/data/potentialarea_wind_settlement-1000m.gpkg')
 pa = pa.set_index("id").drop(['country_id'], axis=1)
 pa = pa.to_crs(3035)
 area_wind = pa.area / 1e6 # kann wahrscheinlich weg
