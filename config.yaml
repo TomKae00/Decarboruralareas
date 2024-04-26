@@ -5,12 +5,13 @@ results_dir: 'results'
 ###################
 # Scenario controls
 
-run: '2024-03-05'
+run: '1run_5_Szenario_all_res_tech_redispatch'
+# 1run_5_Szenario_all_tech (dies ist ohne gas)
 
 # wildcards
 scenario:
   selected_system_id: #[
-    'Brandenburg_Fernwaerme.32' #, 'Brandenburg_Fernwaerme.2'
+    'Brandenburg_Fernwaerme.29' #, 'Brandenburg_Fernwaerme.2'
   #]
   year_of_interest: #[
     '2018' #, '2020'
@@ -25,40 +26,35 @@ scenario:
     '2025' #,'2030' ,'2035'
   #]
   r: #[
-    6 #,5 ,8
+    7 #,5 ,8
   #]
   electricity_price: #[
-    170 #,100 ,400
+    130 #,100 ,400
   #]
   co2_price: #[
-    55 #,60 ,70
+    80 #,60 ,70
   #]
   gas_price: #[
-    60 #,60 ,70
+    50 #,60 ,70
   #]
 
 
 
 components_enabled:
-  central excess-heat heat pump: false
-  central sourced-water heat pump: false
-  central sourced-sea heat pump: false
+  central excess-heat heat pump: true
+  central sourced-water heat pump: true
+  central sourced-sea heat pump: true
   central air sourced heat pump: true
-  central H2 boiler: false
+  central H2 boiler: true
   central electric boiler: true
   central gas boiler: false
-  electrolysis AEC: false
-  electrolysis PEMEC: false
+  electrolysis AEC: true
+  electrolysis PEMEC: true
   central water tank storage: true
-  PTES: false
-
-
-min_temp_thresholds:
-  Luft: 0
-  Flussthermie: 0
-  Seethermie: 0
-  Abwaerme: 0
-
+  PTES: true
+  battery: true
+  H2 store: true
+  redispatch wind power: true
 
 ###################
 # fixed settings
@@ -69,9 +65,9 @@ cost_functions: # also applies for linearizing_costs!!!!
   project_year: '2025'
   Abwaerme: 50 # temperature of electrolysis excess heat
   min_temp_thresholds:
-      Luft: 0
-      Flussthermie: 0
-      Seethermie: 0
+      Luft: -5
+      Flussthermie: 3
+      Seethermie: 3
       Abwaerme: 0
   cp: 1.1625
   rho: 1000
@@ -83,53 +79,53 @@ data_energieportal:
 heat_demand:
   base_temperature: 15  # Base temperature for HDD calculation
   hot_water_demand_percentage: 25  # Percentage of total heat demand attributed to hot water
-  heating_season_start: 9  # September
+  heating_season_start: 10  # September
   heating_season_end: 4  # April
 
 financial_params:
   fill_values: 0.0
-  r: 0.06
+  r: 0.07
   nyears: 1
   year: 2025
 
 
 component_parameters:
   "central electric boiler":
-    lower_limit: 150
-    upper_limit: 20000
-    error_threshold: 10
+    lower_limit: 20
+    upper_limit: 50000
+    error_threshold: 20
   "electrolysis AEC":
-    lower_limit: 1000
-    upper_limit: 1000000
-    error_threshold: 10
+    lower_limit: 200
+    upper_limit: 100000
+    error_threshold: 20
   "electrolysis PEMEC":
-    lower_limit: 1000
-    upper_limit: 1000000
-    error_threshold: 10
+    lower_limit: 200
+    upper_limit: 100000
+    error_threshold: 20
   "central gas boiler":
     lower_limit: 10
     upper_limit: 50000
     error_threshold: 10
   "central H2 boiler":
     lower_limit: 10
-    upper_limit: 20000
+    upper_limit: 50000
     error_threshold: 10
   "central excess-heat heat pump":
     lower_limit: 10
-    upper_limit: 15000
-    error_threshold: 10
+    upper_limit: 50000
+    error_threshold: 20
   "central sourced-water heat pump":
     lower_limit: 10
-    upper_limit: 15000
-    error_threshold: 10
+    upper_limit: 50000
+    error_threshold: 20
   "central air sourced heat pump":
     lower_limit: 10
-    upper_limit: 15000
-    error_threshold: 25
+    upper_limit: 50000
+    error_threshold: 20
   "central sourced-sea heat pump":
-    lower_limit: 10
-    upper_limit: 15000
-    error_threshold: 10
+    lower_limit: 50
+    upper_limit: 50000
+    error_threshold: 20
   "PTES":
     lower_limit: 5000
     upper_limit: 200000
