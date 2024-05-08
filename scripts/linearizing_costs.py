@@ -132,6 +132,7 @@ def constant_cost_approx_with_dynamic_segments(cost_function, lower_limit, upper
         # die Intervalle werden in normales Koordinatensystem umgewndelt
         constant_costs = []
         all_errors = []
+        segment_errors = []
 
         for i in range(len(intervals) - 1):
             #zählt Anzahl an Intervalen
@@ -150,19 +151,20 @@ def constant_cost_approx_with_dynamic_segments(cost_function, lower_limit, upper
             errors = np.abs(y_interval - average_cost)
             #print(errors)
             all_errors.extend(errors)
+            segment_errors.append(np.mean(errors))  # Compute average error for the segment
 
-        return np.mean(all_errors), intervals, constant_costs
+        return np.mean(all_errors), intervals, constant_costs, segment_errors
         #hier wird dann der durchschnittliche error dann auf der Basis von allen eingetragen error in der Liste berechnet
 
     # Initial setup
-    num_intervals = 5  # Start with a minimum number of intervals
+    num_intervals = 5  # 5 Start with a minimum number of intervals
     while True:
-        average_error, intervals, constant_costs = calculate_average_error_for_intervals(num_intervals)
+        average_error, intervals, constant_costs, segment_errors = calculate_average_error_for_intervals(num_intervals)
         if average_error <= error_threshold:
             break
         num_intervals += 1
 
-    return num_intervals, average_error, intervals, constant_costs
+    return num_intervals, average_error, intervals, constant_costs, segment_errors
 
 
 # Now, let's integrate this function into the overall process for generating piecewise constant approximations
@@ -174,7 +176,7 @@ def apply_piecewise_approx_to_individual_dfs(cost_functions, component_parameter
         upper_limit = component_parameters[component]["upper_limit"]
         error_threshold = component_parameters[component]["error_threshold"]
 
-        num_intervals, average_error, intervals, constant_costs = constant_cost_approx_with_dynamic_segments(
+        num_intervals, average_error, intervals, constant_costs, segment_errors = constant_cost_approx_with_dynamic_segments(
             cost_function, lower_limit, upper_limit, error_threshold
         )
 
@@ -182,7 +184,8 @@ def apply_piecewise_approx_to_individual_dfs(cost_functions, component_parameter
         data = {
             'Start Capacity': intervals[:-1],  # Exclude the last value for 'start'
             'End Capacity': intervals[1:],  # Exclude the first value for 'end'
-            'Constant Cost': constant_costs
+            'Constant Cost': constant_costs,
+            'Error per Segment': segment_errors  # Include segment-specific errors
         }
 
         # Create a DataFrame for the current component
@@ -193,6 +196,10 @@ def apply_piecewise_approx_to_individual_dfs(cost_functions, component_parameter
 
         # Optional: Plotting for each component
         x_range = np.linspace(lower_limit, upper_limit, 1000)
+        ################
+#        actual_costs = cost_function(x_range)  # Calculate actual costs for the range
+#        approx_costs = np.zeros_like(actual_costs)
+        ###############
         plt.figure(figsize=(12, 8))
         plt.plot(x_range, cost_function(x_range), label='Original Function', color='blue', linewidth=2)
         for i in range(num_intervals):

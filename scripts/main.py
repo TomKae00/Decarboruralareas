@@ -279,7 +279,7 @@ if "central water tank storage" in all_technologies_dfs:
           efficiency=result.loc["water tank discharger", "efficiency"],
           p_nom_extendable=True
           )
-    # add hot water Storage
+#    # add hot water Storage
     n.madd("Store",
            central_water_tank.index,
            bus=["central_water_storage"],
@@ -288,6 +288,7 @@ if "central water tank storage" in all_technologies_dfs:
            e_cyclic=True,
            e_nom_extendable=True,
            )
+
 
 if 'PTES' in all_technologies_dfs and supply_temp <= 95 + 273.15:
     PTES = all_technologies_dfs["PTES"]
@@ -458,13 +459,13 @@ if "central excess-heat heat pump" in all_technologies_dfs:
 
     n.madd('Link',
            eh_electrolysis_hp.index,
-           bus0=['Excess_heat'],
+           bus0=['power'],
            bus1=['heat'],
-           bus2=['power'],
+           bus2=['Excess_heat'],
            capital_cost=eh_electrolysis_hp["fixed"],
            marginal_cost=eh_electrolysis_hp['VOM'],
-           efficiency=(1 / (cop_eh_hp - 1)) * cop_eh_hp,
-           efficiency2=-1 / (cop_eh_hp - 1),
+           efficiency=1 * cop_eh_hp,
+           efficiency2=-1 * cop_eh_hp / (cop_eh_hp - 1),
            p_nom_extendable=True
            )
 
@@ -735,11 +736,10 @@ print(n.links.p_nom_opt)
 
 # plot results (mal gucken was das kann und wofür mann das braucht)
 # n.generators_t.p.plot()
+# n.plot()
 
 # get statistics (mal gucken was das kann und wofür mann das braucht)
 statistics = n.statistics().dropna()
-#balance = n.statistics.energy_balance()
-#print(balance)
 
 n.export_to_csv_folder(
     f"/Users/tomkaehler/Documents/Uni/BA/output/results_{selected_system_id}_{year_of_interest}_supply:{supply_temp}_return:{return_temp}_elecprice_{electricity_price}_gasprice_{gas_price}_CO2price{co2_price}_run_{run}")
