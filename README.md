@@ -1,4 +1,4 @@
-Decarbonization Strategies for District Heating Networks
+# Decarbonization Strategies for District Heating Networks
 
 This repository is part of my Bachelor thesis, titled "Decarbonisation Strategies of District Heating Networks in Rural Regions." The project contains a model to determine the best decarbonization possibilities for existing district heating networks in rural Germany, based on the open-source library PyPSA.
 
